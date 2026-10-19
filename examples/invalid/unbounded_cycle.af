@@ -1,0 +1,25 @@
+# expect: AF-E303
+# writer and reviewer send work back and forth forever:
+# every edge out of the loop goes back into it and there is no max_iterations.
+
+state S {
+  input topic: string
+  draft: string
+  approved: bool = false
+  output final: string
+}
+
+agent writer {
+  state.draft = llm("Write a draft", state.topic)
+}
+
+agent reviewer {
+  state.approved = llm("Is this draft good? yes or no", state.draft) == "yes"
+  state.final = state.draft
+}
+
+flow main {
+  start -> writer -> reviewer
+  reviewer -[not state.approved]-> writer
+  reviewer -[else]-> writer
+}

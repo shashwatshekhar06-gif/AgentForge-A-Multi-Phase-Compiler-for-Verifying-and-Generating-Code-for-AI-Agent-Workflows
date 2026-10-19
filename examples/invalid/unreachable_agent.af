@@ -1,0 +1,21 @@
+# expect: AF-W301
+# `summarizer` is declared and leads to end, but nothing routes to it,
+# so it can never run. It is a warning; the optimizer removes it from the output.
+
+state S {
+  input query: string
+  output answer: string
+}
+
+agent answerer {
+  state.answer = llm("Answer", state.query)
+}
+
+agent summarizer {
+  state.answer = llm("Summarize", state.query)
+}
+
+flow main {
+  start -> answerer -> end
+  summarizer -> end
+}

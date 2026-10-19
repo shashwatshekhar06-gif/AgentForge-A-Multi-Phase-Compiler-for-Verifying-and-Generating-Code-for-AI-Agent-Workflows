@@ -1,0 +1,129 @@
+# Insurance claim processing: a large workflow that passes every check.
+#
+# What it shows:
+#   - state with inputs, outputs, defaults, ints, bools and lists
+#   - eight tools with typed parameters
+#   - if / else if / else inside agents, and llm(...) one_of [...]
+#   - a branch that merges again (approved and rejected claims meet at the notifier)
+#   - two bounded loops: human review (max 2) and document re-checks (max 3)
+#
+# Run it:  python -m compiler ../examples/valid/insurance_claims.af -o claims.py
+#          python claims.py
+
+state Claim {
+  # supplied by the caller
+  input claim_id: string
+  input policy_number: string
+  input description: string
+  input amount: int
+
+  # filled in along the way (defaults make them safe to read on every path)
+  category: string
+  policy_active: bool = false
+  coverage_limit: int = 0
+  documents: list[string] = []
+  fraud_score: int = 0
+  fraud_flags: list[string] = []
+  needs_review: bool = false
+  adjuster_notes: string = ""
+  verified: bool = false
+  payout: int = 0
+  decision: string
+  notified: bool = false
+
+  # must be written before the workflow ends
+  output customer_message: string
+  output audit_log: string
+}
+
+tool fetch_documents(claim_id: string) -> list[string]
+tool lookup_policy(policy_number: string) -> bool
+tool coverage_for(policy_number: string, category: string) -> int
+tool check_fraud_db(claim_id: string, description: string) -> int
+tool fraud_signals(documents: list[string]) -> list[string]
+tool verify_documents(documents: list[string]) -> bool
+tool calculate_payout(amount: int, coverage_limit: int) -> int
+tool send_notification(claim_id: string, message: string) -> bool
+
+# 1. classify the claim and gather its paperwork
+agent intake {
+  state.category = llm("Classify this insurance claim", state.description) one_of ["auto", "home", "health", "travel"]
+  state.documents = fetch_documents(state.claim_id)
+}
+
+# 2. is the policy active, and how much does it cover for this category?
+agent policy_checker {
+  state.policy_active = lookup_policy(state.policy_number)
+  if (state.policy_active) {
+    state.coverage_limit = coverage_for(state.policy_number, state.category)
+  }
+}
+
+# 3. score fraud risk; large or suspicious claims go to a human
+agent fraud_screener {
+  state.fraud_score = check_fraud_db(state.claim_id, state.description)
+  state.fraud_flags = fraud_signals(state.documents)
+  if (state.fraud_score > 80) {
+    state.needs_review = true
+  } else if (state.fraud_score > 50 and state.amount > 5000) {
+    state.needs_review = true
+  } else {
+    state.needs_review = false
+  }
+}
+
+# 4. a human adjuster reviews; may ask for one more round (bounded loop)
+agent human_review {
+  state.adjuster_notes = llm("Summarise the fraud concerns for this claim", state.description, state.fraud_flags, state.fraud_score)
+  state.needs_review = llm("Does this claim still need another review? yes or no", state.adjuster_notes) == "yes"
+}
+
+# 5. check the documents; re-fetch and re-check up to 3 times (bounded loop)
+agent document_verifier {
+  state.documents = fetch_documents(state.claim_id)
+  state.verified = verify_documents(state.documents)
+}
+
+# 6a. approved: work out the payout
+agent payout_calculator {
+  state.payout = calculate_payout(state.amount, state.coverage_limit)
+  state.decision = "approved"
+}
+
+# 6b. rejected: inactive policy, unverifiable documents, or over the limit
+agent rejection_writer {
+  state.payout = 0
+  state.decision = "rejected"
+}
+
+# 7. both branches merge here: decision and payout were written on BOTH paths
+agent customer_notifier {
+  state.customer_message = llm("Write a clear, friendly message about this claim decision", state.category, state.decision, state.payout)
+  state.notified = send_notification(state.claim_id, state.customer_message)
+}
+
+# 8. everything that happened, for compliance
+agent auditor {
+  state.audit_log = llm("Write an audit record", state.claim_id, state.decision, state.payout, state.fraud_score, state.adjuster_notes, state.notified)
+}
+
+flow process_claim {
+  start -> intake -> policy_checker
+
+  policy_checker -[not state.policy_active]-> rejection_writer
+  policy_checker -[else]-> fraud_screener
+
+  fraud_screener -[state.needs_review]-> human_review
+  fraud_screener -[else]-> document_verifier
+
+  human_review -[state.needs_review, max_iterations 2]-> human_review
+  human_review -[else]-> document_verifier
+
+  document_verifier -[not state.verified, max_iterations 3]-> document_verifier
+  document_verifier -[state.verified and state.amount <= state.coverage_limit]-> payout_calculator
+  document_verifier -[else]-> rejection_writer
+
+  payout_calculator -> customer_notifier
+  rejection_writer -> customer_notifier
+  customer_notifier -> auditor -> end
+}

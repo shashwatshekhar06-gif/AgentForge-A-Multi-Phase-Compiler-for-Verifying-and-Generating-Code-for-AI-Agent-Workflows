@@ -1,0 +1,42 @@
+# Fraud investigation: triage a transaction, analyse the transaction graph
+# (retrying up to 3 times while not confident), then write a report.
+
+state FraudCase {
+  input transaction_id: string
+  input amount: int
+  risk: string
+  evidence: list[string] = []
+  graph_score: int = 0
+  confident: bool = false
+  output report: string
+}
+
+tool fetch_transactions(transaction_id: string) -> list[string]
+tool score_graph(evidence: list[string]) -> int
+
+agent triage {
+  if (state.amount > 10000) {
+    state.risk = "high"
+  } else {
+    state.risk = llm("Rate the fraud risk of this transaction", state.transaction_id, state.amount) one_of ["high", "low"]
+  }
+}
+
+agent graph_analyst {
+  state.evidence = fetch_transactions(state.transaction_id)
+  state.graph_score = score_graph(state.evidence)
+  state.confident = state.graph_score > 70
+}
+
+agent report_writer {
+  state.report = llm("Write a fraud report", state.transaction_id, state.risk, state.evidence, state.graph_score)
+}
+
+flow investigate {
+  start -> triage
+  triage -[state.risk == "high"]-> graph_analyst
+  triage -[else]-> report_writer
+  graph_analyst -[not state.confident, max_iterations 3]-> graph_analyst   # bounded retry loop
+  graph_analyst -[else]-> report_writer
+  report_writer -> end
+}

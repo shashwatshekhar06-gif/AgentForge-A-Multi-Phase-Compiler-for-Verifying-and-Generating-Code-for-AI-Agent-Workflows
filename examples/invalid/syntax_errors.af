@@ -1,0 +1,21 @@
+# expect: AF-E101, AF-E102
+# Several syntax errors in one file, to show panic mode recovery:
+# the parser reports each one and continues at the next declaration.
+
+state S {
+  input query string            # missing ':'
+  output answer: string
+}
+
+tool search(q: string) -> list[string]
+
+agent researcher {
+  state.answer = llm("Answer" state.query)   # missing ','
+}
+
+agent helper {
+  state.answer = llm("Help", state.query)
+                                             # missing '}'
+flow main {
+  start -> researcher -> end
+}

@@ -1,0 +1,30 @@
+# Research assistant: classify the question, search the web only for factual ones, then answer.
+
+state AgentState {
+  input query: string
+  context: list[string] = []   # default, so `responder` can read it on the conversational path too
+  output response: string
+  route: string
+}
+
+tool web_search(query: string) -> list[string]
+
+agent classifier {
+  state.route = llm("Classify the query as factual or conversational", state.query) one_of ["factual", "conversational"]
+}
+
+agent researcher {
+  state.context = web_search(state.query)
+}
+
+agent responder {
+  state.response = llm("Answer the query using the context", state.query, state.context)
+}
+
+flow main {
+  start -> classifier
+  classifier -[state.route == "factual"]-> researcher
+  classifier -[else]-> responder
+  researcher -> responder
+  responder -> end
+}

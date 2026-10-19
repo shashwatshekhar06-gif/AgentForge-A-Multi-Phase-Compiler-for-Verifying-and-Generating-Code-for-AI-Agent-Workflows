@@ -1,0 +1,19 @@
+{
+  "type": "Program", "line": 1, "col": 1,
+  "declarations": [
+    { "type": "StateDecl", "line": 1, "col": 1, "name": "S", "fields": [
+      { "type": "FieldDecl", "line": 2, "col": 3, "name": "q", "modifier": "input", "field_type": "string", "default": null },
+      { "type": "FieldDecl", "line": 3, "col": 3, "name": "a", "modifier": "output", "field_type": "string", "default": null }
+    ]},
+    { "type": "AgentDecl", "line": 5, "col": 1, "name": "answer", "body": [
+      { "type": "Assign", "line": 6, "col": 3,
+        "target": { "type": "StateRef", "line": 6, "col": 3, "field": "a" },
+        "value": { "type": "LlmCall", "line": 6, "col": 13, "prompt": "Answer", "one_of": null,
+                   "args": [ { "type": "StateRef", "line": 6, "col": 28, "field": "q" } ] } }
+    ]},
+    { "type": "FlowDecl", "line": 8, "col": 1, "name": "main", "edges": [
+      { "type": "Edge", "line": 9, "col": 3, "source": "start", "target": "answer", "condition": null, "is_default": false, "max_iterations": null },
+      { "type": "Edge", "line": 9, "col": 12, "source": "answer", "target": "end", "condition": null, "is_default": false, "max_iterations": null }
+    ]}
+  ]
+}

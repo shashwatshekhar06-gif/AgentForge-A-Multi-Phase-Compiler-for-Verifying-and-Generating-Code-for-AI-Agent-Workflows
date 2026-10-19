@@ -1,0 +1,132 @@
+# expect: AF-W208, AF-E302, AF-E303, AF-E304, AF-E305, AF-W301, AF-W306
+#
+# Loan approval: a large workflow that is syntactically correct and well typed,
+# but has SEVEN structural bugs. Verification blocks code generation, so no
+# money is ever spent running a broken workflow. Every bug is marked BUG below.
+#
+#   BUG 1  AF-E302  underwriter reads debt_ratio, but small loans skip affordability
+#   BUG 2  AF-E304  rejected applicants never get approval_letter (an output)
+#   BUG 3  AF-E303  the appeal loop never exits and has no max_iterations
+#   BUG 4  AF-E305  manual_hold has no outgoing edge: the run gets stuck there
+#   BUG 5  AF-W301  fraud_watch is declared but nothing routes to it (dead agent)
+#   BUG 6  AF-W306  pricing branches on risk_band but has no else edge
+#   BUG 7  AF-W208  "hgh" is a typo: risk_band can only be low, medium or high
+
+state LoanApplication {
+  input applicant_id: string
+  input income: int
+  input requested_amount: int
+
+  credit_score: int
+  risk_band: string
+  employment_verified: bool
+  documents: list[string] = []
+  missing_docs: list[string] = []
+  debt_ratio: int
+  offer_rate: int
+  underwriter_notes: string
+  decision: string
+
+  output approval_letter: string
+  output decision_summary: string
+}
+
+tool fetch_credit_score(applicant_id: string) -> int
+tool verify_employment(applicant_id: string) -> bool
+tool collect_documents(applicant_id: string) -> list[string]
+tool find_missing(documents: list[string]) -> list[string]
+tool compute_debt_ratio(income: int, amount: int) -> int
+tool price_loan(credit_score: int, risk_band: string) -> int
+
+agent credit_check {
+  state.credit_score = fetch_credit_score(state.applicant_id)
+  state.risk_band = llm("Rate the lending risk", state.applicant_id, state.credit_score) one_of ["low", "medium", "high"]
+}
+
+agent employment_check {
+  state.employment_verified = verify_employment(state.applicant_id)
+}
+
+agent document_collector {
+  state.documents = collect_documents(state.applicant_id)
+  state.missing_docs = find_missing(state.documents)
+}
+
+agent affordability {
+  state.debt_ratio = compute_debt_ratio(state.income, state.requested_amount)
+}
+
+# BUG 1: reads state.debt_ratio, which is only written by affordability
+agent underwriter {
+  state.underwriter_notes = llm("Assess this application", state.credit_score, state.debt_ratio, state.missing_docs)
+}
+
+# BUG 4: reachable, but no edge ever leaves it
+agent manual_hold {
+  state.underwriter_notes = "on hold for manual review"
+}
+
+agent pricing {
+  state.offer_rate = price_loan(state.credit_score, state.risk_band)
+}
+
+agent approver {
+  state.decision = "approved"
+  state.approval_letter = llm("Write the approval letter", state.applicant_id, state.requested_amount, state.offer_rate)
+}
+
+# BUG 2: writes decision but not the output approval_letter
+agent rejecter {
+  state.decision = "rejected"
+}
+
+# BUG 3: these two agents form a loop with no way out
+agent appeal_handler {
+  state.decision = "appealed"
+}
+
+agent appeal_reviewer {
+  state.underwriter_notes = llm("Review the appeal", state.applicant_id, state.decision)
+}
+
+# BUG 5: nothing routes to this agent
+agent fraud_watch {
+  state.underwriter_notes = llm("Check for identity fraud", state.applicant_id)
+}
+
+agent summary_writer {
+  state.decision_summary = llm("Summarise the decision for the applicant", state.decision)
+}
+
+flow approve_loan {
+  start -> credit_check -> employment_check
+
+  employment_check -[not state.employment_verified]-> rejecter
+  employment_check -[else]-> document_collector
+
+  # BUG 1: small loans go straight to the underwriter, skipping affordability
+  document_collector -[state.requested_amount > 50000]-> affordability
+  document_collector -[else]-> underwriter
+  affordability -> underwriter
+
+  underwriter -[state.credit_score < 500]-> manual_hold
+  underwriter -[else]-> pricing
+
+  # BUG 6 (no else) and BUG 7 (typo)
+  pricing -[state.risk_band == "low"]-> approver
+  pricing -[state.risk_band == "medium"]-> approver
+  pricing -[state.risk_band == "hgh"]-> rejecter
+
+  approver -> summary_writer
+
+  rejecter -[state.decision == "rejected"]-> appeal_handler
+  rejecter -[else]-> summary_writer
+
+  # BUG 3: every edge out of appeal_reviewer leads back into the loop
+  appeal_handler -> appeal_reviewer
+  appeal_reviewer -[state.underwriter_notes == "overturn"]-> appeal_handler
+  appeal_reviewer -[else]-> appeal_handler
+
+  fraud_watch -> summary_writer
+  summary_writer -> end
+}

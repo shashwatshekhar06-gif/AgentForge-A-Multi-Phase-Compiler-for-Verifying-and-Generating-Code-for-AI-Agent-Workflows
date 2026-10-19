@@ -1,0 +1,265 @@
+{
+  "type": "Program",
+  "line": 1,
+  "col": 1,
+  "declarations": [
+    {
+      "type": "StateDecl",
+      "line": 3,
+      "col": 1,
+      "name": "AgentState",
+      "fields": [
+        {
+          "type": "FieldDecl",
+          "line": 4,
+          "col": 3,
+          "name": "query",
+          "modifier": "input",
+          "field_type": "string",
+          "default": null
+        },
+        {
+          "type": "FieldDecl",
+          "line": 5,
+          "col": 3,
+          "name": "context",
+          "modifier": null,
+          "field_type": "list[string]",
+          "default": []
+        },
+        {
+          "type": "FieldDecl",
+          "line": 6,
+          "col": 3,
+          "name": "response",
+          "modifier": "output",
+          "field_type": "string",
+          "default": null
+        },
+        {
+          "type": "FieldDecl",
+          "line": 7,
+          "col": 3,
+          "name": "route",
+          "modifier": null,
+          "field_type": "string",
+          "default": null
+        }
+      ]
+    },
+    {
+      "type": "ToolDecl",
+      "line": 10,
+      "col": 1,
+      "name": "web_search",
+      "params": [
+        {
+          "type": "Param",
+          "line": 10,
+          "col": 17,
+          "name": "query",
+          "param_type": "string"
+        }
+      ],
+      "return_type": "list[string]"
+    },
+    {
+      "type": "AgentDecl",
+      "line": 12,
+      "col": 1,
+      "name": "classifier",
+      "body": [
+        {
+          "type": "Assign",
+          "line": 13,
+          "col": 3,
+          "target": {
+            "type": "StateRef",
+            "line": 13,
+            "col": 3,
+            "field": "route"
+          },
+          "value": {
+            "type": "LlmCall",
+            "line": 13,
+            "col": 17,
+            "prompt": "Classify the query as factual or conversational",
+            "args": [
+              {
+                "type": "StateRef",
+                "line": 13,
+                "col": 72,
+                "field": "query"
+              }
+            ],
+            "one_of": [
+              {
+                "type": "Literal",
+                "line": 13,
+                "col": 93,
+                "value": "factual",
+                "value_type": "string"
+              },
+              {
+                "type": "Literal",
+                "line": 13,
+                "col": 104,
+                "value": "conversational",
+                "value_type": "string"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "AgentDecl",
+      "line": 16,
+      "col": 1,
+      "name": "researcher",
+      "body": [
+        {
+          "type": "Assign",
+          "line": 17,
+          "col": 3,
+          "target": {
+            "type": "StateRef",
+            "line": 17,
+            "col": 3,
+            "field": "context"
+          },
+          "value": {
+            "type": "Call",
+            "line": 17,
+            "col": 19,
+            "name": "web_search",
+            "args": [
+              {
+                "type": "StateRef",
+                "line": 17,
+                "col": 30,
+                "field": "query"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "AgentDecl",
+      "line": 20,
+      "col": 1,
+      "name": "responder",
+      "body": [
+        {
+          "type": "Assign",
+          "line": 21,
+          "col": 3,
+          "target": {
+            "type": "StateRef",
+            "line": 21,
+            "col": 3,
+            "field": "response"
+          },
+          "value": {
+            "type": "LlmCall",
+            "line": 21,
+            "col": 20,
+            "prompt": "Answer the query using the context",
+            "args": [
+              {
+                "type": "StateRef",
+                "line": 21,
+                "col": 62,
+                "field": "query"
+              },
+              {
+                "type": "StateRef",
+                "line": 21,
+                "col": 75,
+                "field": "context"
+              }
+            ],
+            "one_of": null
+          }
+        }
+      ]
+    },
+    {
+      "type": "FlowDecl",
+      "line": 24,
+      "col": 1,
+      "name": "main",
+      "edges": [
+        {
+          "type": "Edge",
+          "line": 25,
+          "col": 3,
+          "source": "start",
+          "target": "classifier",
+          "condition": null,
+          "is_default": false,
+          "max_iterations": null
+        },
+        {
+          "type": "Edge",
+          "line": 26,
+          "col": 3,
+          "source": "classifier",
+          "target": "researcher",
+          "condition": {
+            "type": "BinaryOp",
+            "line": 26,
+            "col": 28,
+            "op": "==",
+            "left": {
+              "type": "StateRef",
+              "line": 26,
+              "col": 16,
+              "field": "route"
+            },
+            "right": {
+              "type": "Literal",
+              "line": 26,
+              "col": 31,
+              "value": "factual",
+              "value_type": "string"
+            }
+          },
+          "is_default": false,
+          "max_iterations": null
+        },
+        {
+          "type": "Edge",
+          "line": 27,
+          "col": 3,
+          "source": "classifier",
+          "target": "responder",
+          "condition": null,
+          "is_default": true,
+          "max_iterations": null
+        },
+        {
+          "type": "Edge",
+          "line": 28,
+          "col": 3,
+          "source": "researcher",
+          "target": "responder",
+          "condition": null,
+          "is_default": false,
+          "max_iterations": null
+        },
+        {
+          "type": "Edge",
+          "line": 29,
+          "col": 3,
+          "source": "responder",
+          "target": "end",
+          "condition": null,
+          "is_default": false,
+          "max_iterations": null
+        }
+      ]
+    }
+  ]
+}

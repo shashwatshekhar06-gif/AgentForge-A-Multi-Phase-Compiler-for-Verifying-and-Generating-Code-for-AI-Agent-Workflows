@@ -1,0 +1,24 @@
+# expect: AF-W208
+# `route` can only be "factual" or "conversational" (from one_of),
+# so the edge testing "factul" can never be taken. It is a warning.
+
+state S {
+  input query: string
+  route: string
+  output response: string
+}
+
+agent classifier {
+  state.route = llm("Classify the query", state.query) one_of ["factual", "conversational"]
+}
+
+agent responder {
+  state.response = llm("Answer", state.query)
+}
+
+flow main {
+  start -> classifier
+  classifier -[state.route == "factul"]-> responder
+  classifier -[else]-> responder
+  responder -> end
+}

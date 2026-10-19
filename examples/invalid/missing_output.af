@@ -1,0 +1,24 @@
+# expect: AF-E304
+# On the conversational path the flow goes straight to end,
+# so the output field `response` is never written there.
+
+state S {
+  input query: string
+  route: string
+  output response: string
+}
+
+agent classifier {
+  state.route = llm("Classify the query", state.query) one_of ["factual", "conversational"]
+}
+
+agent responder {
+  state.response = llm("Answer", state.query)
+}
+
+flow main {
+  start -> classifier
+  classifier -[state.route == "factual"]-> responder
+  classifier -[else]-> end
+  responder -> end
+}

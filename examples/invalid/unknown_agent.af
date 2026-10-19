@@ -1,0 +1,15 @@
+# expect: AF-E204
+# The flow refers to `reseacher` (typo), which is not a declared agent.
+
+state S {
+  input query: string
+  output answer: string
+}
+
+agent researcher {
+  state.answer = llm("Answer", state.query)
+}
+
+flow main {
+  start -> reseacher -> end
+}

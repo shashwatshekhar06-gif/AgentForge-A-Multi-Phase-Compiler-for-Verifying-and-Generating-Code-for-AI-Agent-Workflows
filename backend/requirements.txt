@@ -1,0 +1,6 @@
+# the compiler itself uses only the Python standard library
+fastapi
+uvicorn[standard]
+pytest
+httpx          # used by FastAPI's TestClient in tests
+langgraph      # only needed to RUN the generated workflow files

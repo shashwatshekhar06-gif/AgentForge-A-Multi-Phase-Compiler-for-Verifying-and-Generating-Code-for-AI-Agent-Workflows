@@ -1,0 +1,19 @@
+# expect: AF-E201
+# The agent calls `search_web`, but the tool is declared as `web_search`.
+
+state S {
+  input query: string
+  output answer: string
+  context: list[string] = []
+}
+
+tool web_search(query: string) -> list[string]
+
+agent researcher {
+  state.context = search_web(state.query)
+  state.answer = llm("Answer", state.query, state.context)
+}
+
+flow main {
+  start -> researcher -> end
+}

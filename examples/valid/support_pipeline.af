@@ -1,0 +1,48 @@
+# Support ticket pipeline: branch on the language, merge again, then reply.
+# `translated` is written on BOTH branches, so the analyzer may safely read it.
+
+state Ticket {
+  input message: string
+  language: string
+  translated: string
+  sentiment: string
+  summary: string
+  output reply: string
+}
+
+tool detect_language(text: string) -> string
+tool translate(text: string, target: string) -> string
+
+agent detector {
+  state.language = detect_language(state.message)
+}
+
+agent translator {
+  state.translated = translate(state.message, "en")
+}
+
+agent passthrough {
+  state.translated = state.message
+}
+
+agent analyzer {
+  state.sentiment = llm("Classify the sentiment", state.translated) one_of ["positive", "negative", "neutral"]
+  state.summary = llm("Summarize the ticket", state.translated)
+}
+
+agent replier {
+  if (state.sentiment == "negative") {
+    state.reply = llm("Write an apologetic reply", state.summary)
+  } else {
+    state.reply = llm("Write a friendly reply", state.summary)
+  }
+}
+
+flow support {
+  start -> detector
+  detector -[state.language != "en"]-> translator
+  detector -[else]-> passthrough
+  translator -> analyzer
+  passthrough -> analyzer
+  analyzer -> replier -> end
+}

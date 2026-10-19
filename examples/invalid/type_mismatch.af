@@ -1,0 +1,17 @@
+# expect: AF-E203
+# llm(...) returns a string, but `context` is a list[string].
+
+state S {
+  input query: string
+  context: list[string]
+  output answer: string
+}
+
+agent researcher {
+  state.context = llm("Find facts about the query", state.query)
+  state.answer = llm("Answer", state.query, state.context)
+}
+
+flow main {
+  start -> researcher -> end
+}
