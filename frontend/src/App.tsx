@@ -9,8 +9,10 @@ import AstTab from "./components/AstTab";
 import GraphTab from "./components/GraphTab";
 import VerifyTab from "./components/VerifyTab";
 import CodeTab from "./components/CodeTab";
+import CostTab from "./components/CostTab";
+import ProblemsPanel from "./components/ProblemsPanel";
 
-const TABS = ["Tokens", "AST", "Graph", "Verification", "Generated code"] as const;
+const TABS = ["Tokens", "AST", "Graph", "Verification", "Cost", "Generated code"] as const;
 type Tab = (typeof TABS)[number];
 
 const STARTER = `# Write an AgentForge workflow here, or pick an example above.
@@ -35,6 +37,14 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("Graph");
   const [busy, setBusy] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [problemsHeight, setProblemsHeight] = useState(() => {
+    try {
+      return Number(localStorage.getItem("af-problems-height")) || 200;
+    } catch {
+      return 200;
+    }
+  });
+  const leftRef = useRef<HTMLElement>(null);
 
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
@@ -122,8 +132,31 @@ export default function App() {
     compile();
   };
 
-  const errors = result?.diagnostics.filter((d) => d.severity === "error").length ?? 0;
-  const warnings = result?.diagnostics.filter((d) => d.severity === "warning").length ?? 0;
+  // drag the bar above the Problems panel to resize it
+  const startResize = (event: React.PointerEvent) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = problemsHeight;
+    const maxHeight = (leftRef.current?.clientHeight ?? 800) - 120;   // always leave room for the editor
+    let latest = startHeight;
+    const onMove = (e: PointerEvent) => {
+      latest = Math.min(maxHeight, Math.max(36, startHeight + (startY - e.clientY)));
+      setProblemsHeight(latest);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.cursor = "";
+      try {
+        localStorage.setItem("af-problems-height", String(latest));
+      } catch {
+        /* storage unavailable: the size just will not be remembered */
+      }
+    };
+    document.body.style.cursor = "row-resize";
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -143,7 +176,7 @@ export default function App() {
           >
             <option value="" disabled>Load an example…</option>
             {(["valid", "invalid"] as const).map((category) => (
-              <optgroup key={category} label={category === "valid" ? "Valid workflows" : "Invalid (one bug each)"}>
+              <optgroup key={category} label={category === "valid" ? "Valid workflows" : "With problems (errors, warnings, savings)"}>
                 {examples.filter((e) => e.category === category).map((e) => (
                   <option key={e.name} value={e.name}>{e.name}</option>
                 ))}
@@ -163,38 +196,27 @@ export default function App() {
 
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-2 min-h-0">
         {/* left: editor + problems */}
-        <section className="flex flex-col min-h-0 border-r border-slate-200 bg-white">
-          <div className="flex-1 min-h-[300px]">
+        <section ref={leftRef} className="flex flex-col min-h-0 border-r border-slate-200 bg-white">
+          <div className="flex-1 min-h-[120px]">
             <Editor
               language="agentforge"
               theme="agentforge-light"
               value={source}
               onChange={(value) => setSource(value ?? "")}
               onMount={onMount}
-              options={{ fontSize: 15, minimap: { enabled: false }, scrollBeyondLastLine: false, tabSize: 2 }}
+              options={{ fontSize: 15, minimap: { enabled: false }, scrollBeyondLastLine: false, tabSize: 2, automaticLayout: true }}
             />
           </div>
-          <div className="border-t border-slate-200 max-h-44 overflow-auto text-sm">
-            <div className="px-3 py-1.5 bg-slate-50 font-semibold text-slate-600 flex gap-3">
-              <span>Problems</span>
-              <span className="text-red-600">{errors} error{errors === 1 ? "" : "s"}</span>
-              <span className="text-amber-600">{warnings} warning{warnings === 1 ? "" : "s"}</span>
-            </div>
-            {serverError && <div className="px-3 py-1.5 text-red-700">{serverError}</div>}
-            {result?.diagnostics.map((d, i) => (
-              <button
-                key={i}
-                onClick={() => revealLine(d.line, d.col)}
-                className="w-full text-left px-3 py-1 hover:bg-slate-100 flex gap-2"
-              >
-                <span className={d.severity === "error" ? "text-red-600" : "text-amber-600"}>
-                  {d.severity === "error" ? "✗" : "⚠"}
-                </span>
-                <span className="font-mono text-slate-500 shrink-0">{d.code}</span>
-                <span className="font-mono text-slate-400 shrink-0">{d.line}:{d.col}</span>
-                <span>{d.message}</span>
-              </button>
-            ))}
+          <div
+            onPointerDown={startResize}
+            onDoubleClick={() => setProblemsHeight(problemsHeight > 60 ? 36 : 200)}
+            className="h-2 shrink-0 cursor-row-resize bg-slate-200 hover:bg-violet-400 flex items-center justify-center group"
+            title="Drag to resize the Problems panel (double-click to collapse or restore)"
+          >
+            <div className="w-10 h-0.5 rounded bg-slate-400 group-hover:bg-white" />
+          </div>
+          <div style={{ height: problemsHeight }} className="shrink-0 min-h-0">
+            <ProblemsPanel diagnostics={result?.diagnostics ?? []} serverError={serverError} onSelect={revealLine} />
           </div>
         </section>
 
@@ -222,9 +244,16 @@ export default function App() {
             ) : tab === "AST" ? (
               <AstTab phase={result.phases.parser} onSelect={revealLine} />
             ) : tab === "Graph" ? (
-              <GraphTab phase={result.phases.ir} removed={result.phases.optimize.removed_agents} onSelect={revealLine} />
+              <GraphTab
+                phase={result.phases.ir}
+                removed={result.phases.optimize.removed_agents}
+                diagnostics={result.diagnostics}
+                onSelect={revealLine}
+              />
             ) : tab === "Verification" ? (
               <VerifyTab result={result} />
+            ) : tab === "Cost" ? (
+              <CostTab result={result} />
             ) : (
               <CodeTab phase={result.phases.codegen} />
             )}

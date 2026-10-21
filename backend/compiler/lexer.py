@@ -34,7 +34,7 @@ SINGLE_CHAR = {
 }
 
 def is_name_start(ch: str) -> bool:
-    # ASCII only: Python's isalpha()/isdigit() also accept characters like '²' or 'é',
+    # ASCII only: Python's isalpha()/isdigit() also accept characters such as a superscript two or an accented e,
     # which would break int() and the generated Python names
     return ch.isascii() and (ch.isalpha() or ch == "_")
 

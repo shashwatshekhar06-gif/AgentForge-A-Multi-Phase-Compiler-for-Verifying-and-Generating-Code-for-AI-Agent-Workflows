@@ -1,6 +1,6 @@
 """Runs every compiler phase in order and builds the API response (docs/contract.md).
 
-lexer -> parser -> semantic -> ir -> verify -> optimize -> codegen
+lexer -> parser -> semantic -> ir -> verify -> optimize -> cost -> codegen
 
 If a phase reports an error, the following phases are marked "skipped",
 but the output of the phases that did run is still returned so the UI can show it.
@@ -10,10 +10,11 @@ import sys
 
 from . import ast_nodes as ast
 from .codegen import generate
+from .cost import analyze_cost
 from .diagnostics import error, has_errors
 from .ir import build_ir
 from .lexer import tokenize
-from .optimize import eliminate_dead_agents
+from .optimize import eliminate_dead_agents, eliminate_dead_llm_calls
 from .parser import parse
 from .semantic import analyze
 from .verify import verify
@@ -23,7 +24,7 @@ from .verify import verify
 # workflows, so raise it. Deep *nesting* in the source is limited separately by the parser (AF-E103).
 sys.setrecursionlimit(max(sys.getrecursionlimit(), 20_000))
 
-PHASES = ["lexer", "parser", "semantic", "ir", "verify", "optimize", "codegen"]
+PHASES = ["lexer", "parser", "semantic", "ir", "verify", "optimize", "cost", "codegen"]
 
 EMPTY_DATA = {
     "lexer": {"tokens": []},
@@ -31,7 +32,9 @@ EMPTY_DATA = {
     "semantic": {"symbols": {"state": [], "tools": [], "agents": []}},
     "ir": {"nodes": [], "edges": []},
     "verify": {"checks": []},
-    "optimize": {"removed_agents": []},
+    "optimize": {"removed_agents": [], "removed_stores": []},
+    "cost": {"worst": {"llm": None, "tool": None}, "best": {"llm": None, "tool": None}, "agents": [],
+             "unbounded_loops": [], "removed_llm_calls": 0},
     "codegen": {"code": ""},
 }
 
@@ -122,11 +125,23 @@ def compile_back_half(program: ast.Program, run: CompileRun, source_name: str) -
     if not run.record("verify", {"checks": checks}, diags):
         return run.result()
 
-    # 6. optimization
-    optimized, removed = eliminate_dead_agents(graph)
-    run.record("optimize", {"removed_agents": removed})
+    # 6. optimization: remove agents that can never run, then LLM calls whose result is never used
+    optimized, removed_agents = eliminate_dead_agents(graph)
+    optimized, removed_stores, diags = eliminate_dead_llm_calls(optimized, symbols)
+    run.record("optimize", {"removed_agents": removed_agents,
+                            "removed_stores": [r.to_dict() for r in removed_stores]}, diags)
 
-    # 7. code generation
+    # 7. static cost analysis (worst / best case number of LLM and tool calls per run)
+    report, cost_diags = analyze_cost(optimized, removed_stores)
+    run.record("cost", report, cost_diags)
+
+    # show the optimizer and cost findings on the graph too (yellow nodes, removed call counts)
+    for r in removed_stores:
+        graph.nodes[r.agent].removed_llm_calls += r.llm_calls
+    mark_node_status(graph, diags + cost_diags)
+    run.phases["ir"] = {"status": "ok", **graph.to_dict()}
+
+    # 8. code generation
     run.record("codegen", {"code": generate(optimized, symbols, source_name)})
     return run.result()
 

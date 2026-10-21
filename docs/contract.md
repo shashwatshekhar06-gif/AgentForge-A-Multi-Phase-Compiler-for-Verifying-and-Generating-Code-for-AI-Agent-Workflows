@@ -20,8 +20,8 @@ Types are written as plain strings: `"string"`, `"int"`, `"bool"`, `"list[string
 |---|---|
 | `Program` | `declarations`: list of `StateDecl \| ToolDecl \| AgentDecl \| FlowDecl`, in source order |
 | `StateDecl` | `name`: str, `fields`: list of `FieldDecl` |
-| `FieldDecl` | `name`: str, `modifier`: `"input" \| "output" \| null`, `field_type`: type string, `default`: `Literal`, a JSON list of `Literal` (for `= [...]`), or `null` |
-| `ToolDecl` | `name`: str, `params`: list of `Param`, `return_type`: type string |
+| `FieldDecl` | `name`: str, `modifier`: `"input" \| "output" \| null`, `field_type`: type string, `default`: `Literal`, a JSON list of `Literal` (for `= [...]`), or `null`, `untrusted`: bool (`input untrusted name: type`) |
+| `ToolDecl` | `name`: str, `params`: list of `Param`, `return_type`: type string, `tags`: list of `"untrusted"` / `"sensitive"` / `"sanitizer"` |
 | `Param` | `name`: str, `param_type`: type string |
 | `AgentDecl` | `name`: str, `body`: list of statements (`Assign \| If`) |
 | `Assign` | `target`: `StateRef`, `value`: expression |
@@ -59,8 +59,8 @@ AST:
   "type": "Program", "line": 1, "col": 1,
   "declarations": [
     { "type": "StateDecl", "line": 1, "col": 1, "name": "S", "fields": [
-      { "type": "FieldDecl", "line": 2, "col": 3, "name": "q", "modifier": "input", "field_type": "string", "default": null },
-      { "type": "FieldDecl", "line": 3, "col": 3, "name": "a", "modifier": "output", "field_type": "string", "default": null }
+      { "type": "FieldDecl", "line": 2, "col": 3, "name": "q", "modifier": "input", "field_type": "string", "default": null, "untrusted": false },
+      { "type": "FieldDecl", "line": 3, "col": 3, "name": "a", "modifier": "output", "field_type": "string", "default": null, "untrusted": false }
     ]},
     { "type": "AgentDecl", "line": 5, "col": 1, "name": "answer", "body": [
       { "type": "Assign", "line": 6, "col": 3,
@@ -99,10 +99,14 @@ Response:
                     "tools":  [{"name": "web_search", "params": [{"name": "query", "type": "string"}], "return_type": "list[string]"}],
                     "agents": [{"name": "classifier", "reads": ["query"], "writes": ["route"], "must_writes": ["route"]}] } },
     "ir":       { "status": "ok",
-                  "nodes": [{"id": "classifier", "kind": "agent", "reads": [], "writes": [], "must_writes": [], "status": "ok", "line": 1}],
+                  "nodes": [{"id": "classifier", "kind": "agent", "reads": [], "writes": [], "must_writes": [], "status": "ok", "line": 1, "llm_calls": 1, "tool_calls": 0}],
                   "edges": [{"from": "classifier", "to": "researcher", "condition": "state.route == \"factual\"", "max_iterations": null, "is_default": false}] },
     "verify":   { "status": "ok", "checks": [{"name": "Reachability", "status": "pass", "message": "...", "path": null}] },
-    "optimize": { "status": "ok", "removed_agents": [] },
+    "optimize": { "status": "ok", "removed_agents": [],
+                  "removed_stores": [{"agent": "writer", "field": "title", "line": 26, "llm_calls_saved": 1}] },
+    "cost":     { "status": "ok", "worst": {"llm": 9, "tool": 15}, "best": {"llm": 3, "tool": 3},
+                  "agents": [{"id": "human_review", "llm_min": 2, "llm_max": 2, "tool_min": 0, "tool_max": 0, "max_visits": 3}],
+                  "unbounded_loops": [], "removed_llm_calls": 0 },
     "codegen":  { "status": "ok", "code": "..." }
   },
   "diagnostics": [
@@ -118,6 +122,10 @@ Field notes:
 - If a phase has errors, every later phase is `"skipped"` (with empty data), but earlier phases' output is still returned so the UI can show partial results. Exception: when `verify` fails, `ir` is still returned (it was built before verify) so the graph can show red nodes.
 - Token `type` is the name of the token kind (`IDENT`, `STRING`, `INT`, `ARROW`, a keyword name in capitals such as `STATE`, ...). The last token is always `EOF`.
 - Agent `reads` = fields the agent reads **before** it has written them itself (so they must come from the caller or an earlier agent). `writes` = every field the agent might write. `must_writes` = fields written on every path through the agent body (an assignment inside only one branch of an `if` is in `writes` but not `must_writes`).
+- Phases, in order: `lexer, parser, semantic, ir, verify, optimize, cost, codegen`.
+- IR node `llm_calls` / `tool_calls`: the most calls one run of that agent's body can make.
+- `optimize.removed_stores`: assignments removed by dead LLM call elimination (liveness analysis).
+- `cost`: static analysis of ONE run. `worst` / `best` = the most / fewest LLM and tool calls on any path from start to end; `null` means unbounded (a loop with no `max_iterations`). `max_visits` = how many times the agent can run in one run (`null` = unbounded). `removed_llm_calls` = worst-case LLM calls per run saved by the optimizer. The cost phase only produces warnings, never errors.
 - IR node `kind`: `"start"`, `"agent"` or `"end"`. Node `status`: `"ok"`, `"warning"` or `"error"`, computed from the diagnostics about that node.
 - IR edge `condition` is the condition re-printed as DSL text, `null` for plain edges and for `else` edges.
 - Verify check `status`: `"pass"`, `"warn"` or `"fail"`. `path` is a witness path (list of node ids) or `null`.
@@ -157,6 +165,9 @@ Returns `[{ "name": "research.af", "category": "valid" | "invalid", "source": ".
 | AF-E304 | verify | an `output` field is not guaranteed to be written on some path to `end` |
 | AF-E305 | verify | node cannot reach `end` |
 | AF-W306 | verify | conditional edges from a node have no `else` edge |
+| AF-W307 | optimize | an assignment computes a value nobody reads afterwards; the optimizer removed it (often saves an LLM call) |
+| AF-W308 | cost | a loop has no `max_iterations`, so the worst-case number of LLM calls per run is unbounded |
+| AF-W309 | verify | untrusted data (from an `untrusted` tool or `input untrusted` field) can reach an argument of a `sensitive` tool: possible prompt injection |
 
 ---
 
@@ -172,3 +183,5 @@ Returns `[{ "name": "research.af", "category": "valid" | "invalid", "source": ".
 8. **Dead agents**: verification warns (AF-W301), then the optimizer removes them before codegen and lists them in `removed_agents`.
 9. **State field defaults**: `name: type = value` (a literal, or `[...]` of literals for lists). A field with a default is written at `start`, like an `input` field. Added because the spec's example reads `state.context` on a path where nothing writes it. The spec's original version is kept as `examples/invalid/read_before_write.af`.
 10. **Lexer errors stop the pipeline**: if the lexer reports errors, the parser is skipped (the spec rule "later phases are skipped").
+11. **Novel optimizations (added for cost effectiveness)**: dead LLM call elimination removes side-effect-free assignments (`llm(...)`, literals, state copies) whose value is never read; tool calls are always kept because they may have side effects. Static cost analysis bounds the number of LLM and tool calls per run before anything runs. See `docs/novelty.md`.
+12. **Prompt-injection taint analysis**: tools can be tagged after their return type: `untrusted` (its result may contain injected instructions), `sensitive` (it has real-world effects), `sanitizer` (its result is clean). Input fields can be declared `input untrusted`. Taint flows through assignments and through `llm(...)` (an LLM can be steered by what it reads), and a sanitizer stops it. Untrusted data reaching an argument of a sensitive tool gives AF-W309 with the data-flow chain. Only explicit data flow is tracked (not influence through `if` conditions or routing).

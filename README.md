@@ -3,7 +3,7 @@
 A compiler for a small language (`.af`) that describes multi-agent AI workflows. It structurally verifies the workflow before anything runs, then generates one runnable [LangGraph](https://github.com/langchain-ai/langgraph) Python file. A web UI shows the output of every compiler phase.
 
 ```
-.af source → lexer → parser (AST) → semantic analysis → graph IR → verification → dead agent elimination → LangGraph .py
+.af source → lexer → parser (AST) → semantic analysis → graph IR → verification → optimization → cost analysis → LangGraph .py
 ```
 
 Compiler Design course project. Every phase is hand written in plain Python (standard library only, no parser generators).
@@ -15,6 +15,8 @@ Compiler Design course project. Every phase is hand written in plain Python (sta
 - **Reachability**: dead agents, nodes that can never reach `end`
 - **Cycles**: loops with no exit and no `max_iterations` bound
 - **State completeness**: a field read before it is written on some path, an `output` field missing on some path to `end` (with a concrete witness path)
+
+It also detects **prompt injection** risks, where untrusted text (a web page, an email) can reach a tool with real-world effects, using taint analysis. And it **saves money**: it removes LLM calls whose results are never used (liveness analysis) and computes, before anything runs, the worst-case and best-case number of LLM calls per run. It warns when a loop has no cost ceiling. See `docs/novelty.md`.
 
 These are structural checks. They do not predict what an LLM will answer.
 
@@ -35,6 +37,7 @@ docs/
   grammar.md      the grammar in EBNF
   explained.md    plain-language explanation of every phase (viva notes)
   testing.md      how the compiler was tested, bugs found, results
+  novelty.md      what is new (dead LLM call elimination, static cost bounds) and the savings
 ```
 
 ## Setup

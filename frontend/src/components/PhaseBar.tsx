@@ -7,6 +7,7 @@ const PHASES: [keyof CompileResult["phases"], string][] = [
   ["ir", "IR"],
   ["verify", "Verify"],
   ["optimize", "Optimize"],
+  ["cost", "Cost"],
   ["codegen", "Codegen"],
 ];
 
@@ -23,7 +24,7 @@ export default function PhaseBar({ result }: { result: CompileResult | null }) {
   return (
     <div className="flex flex-wrap items-center gap-1 px-3 py-2 bg-white border-b border-slate-200 text-sm">
       {PHASES.map(([key, label], i) => {
-        const status = result?.phases[key].status ?? "skipped";
+        const status = result?.phases[key]?.status ?? "skipped";   // ?. : an older backend has fewer phases
         return (
           <div key={key} className="flex items-center gap-1">
             {i > 0 && <span className="text-slate-300">→</span>}

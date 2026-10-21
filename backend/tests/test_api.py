@@ -9,7 +9,7 @@ def test_compile_endpoint_shape():
     source = 'state S { input q: string\n output a: string }\nagent x { state.a = llm("hi", state.q) }\nflow f { start -> x -> end }'
     data = client.post("/api/compile", json={"source": source}).json()
     assert data["ok"] is True
-    assert list(data["phases"]) == ["lexer", "parser", "semantic", "ir", "verify", "optimize", "codegen"]
+    assert list(data["phases"]) == ["lexer", "parser", "semantic", "ir", "verify", "optimize", "cost", "codegen"]
     assert data["phases"]["lexer"]["tokens"][0] == {"type": "STATE", "lexeme": "state", "line": 1, "col": 1}
     edge = data["phases"]["ir"]["edges"][0]
     assert set(edge) == {"from", "to", "condition", "max_iterations", "is_default"}

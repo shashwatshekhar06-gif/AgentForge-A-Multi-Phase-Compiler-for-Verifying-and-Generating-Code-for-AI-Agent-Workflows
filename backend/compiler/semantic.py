@@ -22,6 +22,7 @@ class FieldInfo:
     type: str
     modifier: Optional[str]
     default: object   # AST Literal, list of Literal, or None
+    untrusted: bool
     line: int
     col: int
 
@@ -35,6 +36,7 @@ class ToolInfo:
     name: str
     params: list   # list of (name, type)
     return_type: str
+    tags: set = field(default_factory=set)   # "untrusted", "sensitive", "sanitizer"
 
 
 @dataclass
@@ -58,7 +60,7 @@ class SymbolTable:
         return {
             "state": [{"name": f.name, "type": f.type, "modifier": f.modifier} for f in self.fields.values()],
             "tools": [{"name": t.name, "params": [{"name": n, "type": ty} for n, ty in t.params],
-                       "return_type": t.return_type} for t in self.tools.values()],
+                       "return_type": t.return_type, "tags": sorted(t.tags)} for t in self.tools.values()],
             "agents": [{"name": a.name, "reads": a.reads, "writes": a.writes, "must_writes": a.must_writes}
                        for a in self.agents.values()],
         }
@@ -153,7 +155,7 @@ class Analyzer:
             return
         if f.default is not None:
             self.check_default(f)
-        self.symbols.fields[f.name] = FieldInfo(f.name, f.field_type, f.modifier, f.default,
+        self.symbols.fields[f.name] = FieldInfo(f.name, f.field_type, f.modifier, f.default, f.untrusted,
                                                 f.line, f.col)
 
     def check_default(self, f: ast.FieldDecl):
@@ -180,7 +182,7 @@ class Analyzer:
                 self.err("AF-E205", f"duplicate parameter '{p.name}' in tool '{decl.name}'", p)
             seen.add(p.name)
             params.append((p.name, p.param_type))
-        self.symbols.tools[decl.name] = ToolInfo(decl.name, params, decl.return_type)
+        self.symbols.tools[decl.name] = ToolInfo(decl.name, params, decl.return_type, set(decl.tags))
 
     # ---------- pass 2: agents (type check + read/write inference) ----------
 

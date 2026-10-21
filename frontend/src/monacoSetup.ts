@@ -18,7 +18,7 @@ monaco.languages.register({ id: "agentforge" });
 
 monaco.languages.setMonarchTokensProvider("agentforge", {
   keywords: ["state", "tool", "agent", "flow", "start", "end", "input", "output", "llm", "one_of",
-             "if", "else", "and", "or", "not", "max_iterations"],
+             "if", "else", "and", "or", "not", "max_iterations", "untrusted", "sensitive", "sanitizer"],
   typeKeywords: ["string", "int", "bool", "list"],
   constants: ["true", "false"],
   tokenizer: {
@@ -63,5 +63,3 @@ monaco.editor.defineTheme("agentforge-light", {
   ],
   colors: {},
 });
-
-export { monaco };

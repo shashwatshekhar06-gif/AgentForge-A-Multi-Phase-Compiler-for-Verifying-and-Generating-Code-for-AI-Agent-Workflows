@@ -16,7 +16,8 @@
           "name": "query",
           "modifier": "input",
           "field_type": "string",
-          "default": null
+          "default": null,
+          "untrusted": false
         },
         {
           "type": "FieldDecl",
@@ -25,7 +26,8 @@
           "name": "context",
           "modifier": null,
           "field_type": "list[string]",
-          "default": []
+          "default": [],
+          "untrusted": false
         },
         {
           "type": "FieldDecl",
@@ -34,7 +36,8 @@
           "name": "response",
           "modifier": "output",
           "field_type": "string",
-          "default": null
+          "default": null,
+          "untrusted": false
         },
         {
           "type": "FieldDecl",
@@ -43,7 +46,8 @@
           "name": "route",
           "modifier": null,
           "field_type": "string",
-          "default": null
+          "default": null,
+          "untrusted": false
         }
       ]
     },
@@ -61,7 +65,8 @@
           "param_type": "string"
         }
       ],
-      "return_type": "list[string]"
+      "return_type": "list[string]",
+      "tags": []
     },
     {
       "type": "AgentDecl",

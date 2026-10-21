@@ -6,6 +6,7 @@ Each pass is a separate function that returns (checks, diagnostics):
   - check_reach_end      : nodes that can never reach end                     AF-E305
   - check_state_completeness : fields read before they are surely written      AF-E302, AF-E304
   - check_default_edges  : conditional edges without an else edge             AF-W306
+  - check_prompt_injection (taint.py): untrusted data reaching a sensitive tool  AF-W309
 
 These checks are structural: they look at the shape of the workflow and at which
 fields each agent reads and writes. They say nothing about what an LLM will answer.
@@ -314,6 +315,11 @@ def verify(graph: IRGraph, symbols: SymbolTable):
     diagnostics += d
 
     c, d = check_default_edges(graph)
+    checks += c
+    diagnostics += d
+
+    from .taint import check_prompt_injection   # imported here: taint.py itself uses helpers from this file
+    c, d = check_prompt_injection(graph, symbols)
     checks += c
     diagnostics += d
 

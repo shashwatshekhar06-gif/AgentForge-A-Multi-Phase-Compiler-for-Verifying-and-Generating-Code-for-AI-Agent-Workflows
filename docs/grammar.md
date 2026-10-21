@@ -12,12 +12,13 @@ declaration  = state_decl | tool_decl | agent_decl | flow_decl ;
 
 (* state schema *)
 state_decl   = "state" IDENT "{" { field_decl } "}" ;
-field_decl   = [ "input" | "output" ] IDENT ":" type [ "=" default ] ;
+field_decl   = [ "input" [ "untrusted" ] | "output" ] IDENT ":" type [ "=" default ] ;
 default      = literal | "[" [ literal { "," literal } ] "]" ;
 type         = "string" | "int" | "bool" | "list" "[" type "]" ;
 
 (* tools *)
-tool_decl    = "tool" IDENT "(" [ param { "," param } ] ")" "->" type ;
+tool_decl    = "tool" IDENT "(" [ param { "," param } ] ")" "->" type { tool_tag } ;
+tool_tag     = "untrusted" | "sensitive" | "sanitizer" ;
 param        = IDENT ":" type ;
 
 (* agents *)
@@ -58,10 +59,10 @@ literal      = STRING | INT | "true" | "false" ;
 
 | Token | Pattern |
 |---|---|
-| IDENT | letter or `_`, then letters, digits, `_` (not a keyword) |
-| INT | one or more digits |
+| IDENT | ASCII letter or `_`, then ASCII letters, digits, `_` (not a keyword) |
+| INT | one or more ASCII digits |
 | STRING | `"..."` on one line, escapes `\"` `\\` `\n` `\t` |
-| keywords | `state tool agent flow start end input output llm one_of if else and or not true false max_iterations string int bool list` |
+| keywords | `state tool agent flow start end input output llm one_of if else and or not true false max_iterations string int bool list untrusted sensitive sanitizer` |
 | symbols | `{ } ( ) [ ] , : . = == != < > <= >= -> -[` |
 | comment | `#` to end of line (skipped) |
 

@@ -143,24 +143,25 @@ def random_workflow(rng: random.Random):
     defaults = {f for f in fields if rng.random() < 0.25}
     outputs = {f for f in fields if rng.random() < 0.3}
 
-    must, reads, body = {}, {}, {}
+    must, reads, body, llm_count = {}, {}, {}, {}
     for a in agents:
         r = [f for f in fields if rng.random() < 0.3]
         lines = []
         if r:   # read first, so these are reads of values from earlier agents
             lines.append("if (" + " or ".join(f'state.{f} == "x"' for f in r) + ") { }")
-        must_writes = set()
+        must_writes, n_llm = set(), 0
         for f in fields:
             roll = rng.random()
             if roll < 0.3:      # plain write: definite
                 lines.append(f'state.{f} = llm("w", state.q)')
                 must_writes.add(f)
+                n_llm += 1
             elif roll < 0.4:    # write in one branch only: not definite
                 lines.append(f'if (state.q == "z") {{ state.{f} = "v" }}')
             elif roll < 0.5:    # write in both branches: definite
                 lines.append(f'if (state.q == "z") {{ state.{f} = "v" }} else {{ state.{f} = "w" }}')
                 must_writes.add(f)
-        must[a], reads[a], body[a] = must_writes, r, lines
+        must[a], reads[a], body[a], llm_count[a] = must_writes, r, lines, n_llm
 
     # edges: every node gets one plain edge, or conditional edges (+ maybe an else), or nothing
     edges = []   # (source, target, conditional, bounded, is_else)
@@ -179,7 +180,9 @@ def random_workflow(rng: random.Random):
 
     lines = ["state S {", "  input q: string"]
     for f in fields:
-        lines.append(f"  {'output ' if f in outputs else ''}{f}: string{' = \"\"' if f in defaults else ''}")
+        modifier = "output " if f in outputs else ""
+        default = ' = ""' if f in defaults else ""   # (kept out of the f-string so it also parses on Python 3.11)
+        lines.append(f"  {modifier}{f}: string{default}")
     lines.append("}")
     for a in agents:
         lines.append(f"agent {a} {{")
@@ -197,7 +200,7 @@ def random_workflow(rng: random.Random):
     lines.append("}")
 
     model = {"agents": agents, "fields": fields, "initial": defaults | {"q"}, "outputs": outputs,
-             "must": must, "reads": reads, "edges": edges}
+             "must": must, "reads": reads, "edges": edges, "llm": llm_count}
     return "\n".join(lines), model
 
 
