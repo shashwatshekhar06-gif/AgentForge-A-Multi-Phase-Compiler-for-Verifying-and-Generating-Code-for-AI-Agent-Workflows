@@ -8,6 +8,28 @@ A compiler for a small language (`.af`) that describes multi-agent AI workflows.
 
 Compiler Design course project. Every phase is hand written in plain Python (standard library only, no parser generators).
 
+![AgentForge: source, phases and the workflow graph](docs/slides_assets/03_graph_research.png)
+
+## Why a compiler for this?
+
+A multi-agent workflow is several AI steps ("agents") that share one state, with branches and loops, and every AI call costs money. Written directly in a runtime library, mistakes show up only while running. We wrote the same bugs directly in LangGraph 1.2.16 and ran them:
+
+| Bug | Plain LangGraph | AgentForge |
+|---|---|---|
+| Edge to a misspelled node | error at `compile()` | AF-E204 |
+| Route returns a typo | runs, silently stops | AF-W208 |
+| Unreachable node | runs, never mentioned | AF-W301 |
+| Node with no outgoing edge | runs, silently ends there | AF-E305 |
+| Reading a field nobody wrote | `KeyError` at runtime, after paid AI calls | AF-E302 |
+| Wrong type written | runs (`TypedDict` is not enforced) | AF-E203 |
+| Endless loop | about 10,000 steps, each possibly a paid call | AF-E303 |
+| Loop with no bound | nothing | AF-W308 |
+| AI result never used | paid on every run | AF-W307 |
+| Untrusted text reaching a refund tool | nothing | AF-W309 |
+| Output not written on one path | caller gets an empty value | AF-E304 |
+
+LangGraph catches 1 of these 11 before running. The compiler catches all of them before anything runs, with a line number and, where it applies, the exact path that causes the problem.
+
 ## What it checks
 
 - **Syntax**, with error recovery (several errors per run)
@@ -16,28 +38,42 @@ Compiler Design course project. Every phase is hand written in plain Python (sta
 - **Cycles**: loops with no exit and no `max_iterations` bound
 - **State completeness**: a field read before it is written on some path, an `output` field missing on some path to `end` (with a concrete witness path)
 
-It also detects **prompt injection** risks, where untrusted text (a web page, an email) can reach a tool with real-world effects, using taint analysis. And it **saves money**: it removes LLM calls whose results are never used (liveness analysis) and computes, before anything runs, the worst-case and best-case number of LLM calls per run. It warns when a loop has no cost ceiling. See `docs/novelty.md`.
+Three analyses go beyond the usual checks (details in `docs/novelty.md`):
+
+- **Dead LLM call elimination** (liveness analysis): removes AI calls whose result is never read. On `wasted_llm_calls.af`, 7 calls become 4.
+- **Static worst-case cost** (WCET-style): the maximum and minimum number of AI calls per run, computed before anything runs. A loop with no bound is flagged (AF-W308).
+- **Prompt-injection taint analysis**: tools tagged `untrusted`, `sensitive` and `sanitizer`; untrusted text that can reach a sensitive tool gives AF-W309 with the exact chain.
 
 These are structural checks. They do not predict what an LLM will answer.
+
+## Results
+
+- 210 automated tests, all passing, including 75 edge cases, mutation fuzzing, and a brute-force check of the cost analysis. Testing found 8 real bugs, all fixed (`docs/testing.md`).
+- 4 valid examples compile and run (the largest, `insurance_claims.af`, is 129 lines). 13 invalid examples are each blocked or warned with their expected code. `loan_approval_blocked.af` (132 lines) reports 7 bugs in one compile and generates no code.
+- A 3,000-agent workflow compiles in about 0.4 seconds.
+
+Limitations: the AI and tools are mocks in the generated file, cost is counted in calls rather than tokens, taint analysis follows explicit data flow only, and LangGraph is the only target.
 
 ## Project layout
 
 ```
 backend/
   compiler/       the compiler: tokens, lexer, parser, ast_nodes, diagnostics,
-                  semantic, ir, verify, optimize, codegen, pipeline, cli
+                  semantic, ir, verify, optimize, cost, taint, codegen, pipeline, cli
   api.py          FastAPI server (POST /api/compile, GET /api/examples)
   tests/          pytest suite (+ hand written AST fixtures)
-frontend/         React + Vite + TypeScript UI (Monaco editor, React Flow graph)
+frontend/         React + Vite + TypeScript UI (Monaco editor, React Flow graph, cost view)
 examples/
-  valid/          research.af, fraud.af, support_pipeline.af
+  valid/          research.af, fraud.af, support_pipeline.af, insurance_claims.af
   invalid/        one file per bug class; the first line says which code it must produce
 docs/
   contract.md     AST schema, API schema, diagnostic codes, design decisions
   grammar.md      the grammar in EBNF
-  explained.md    plain-language explanation of every phase (viva notes)
+  explained.md    plain-language explanation of every phase
   testing.md      how the compiler was tested, bugs found, results
-  novelty.md      what is new (dead LLM call elimination, static cost bounds) and the savings
+  novelty.md      what is new (dead LLM call elimination, cost bounds, taint analysis)
+  viva_prep.md    the whole project explained step by step, with likely questions
+  slides_assets/  screenshots of the web UI
 ```
 
 ## Setup
@@ -97,7 +133,7 @@ cd backend
 python -m pytest -q
 ```
 
-The suite covers the lexer, parser, semantic analysis, each verification pass and codegen. It compiles every valid example and runs `py_compile` on the output, checks every invalid example produces exactly its expected codes, and (if `langgraph` is installed) runs the generated files.
+The suite (210 tests) covers the lexer, parser, semantic analysis, each verification pass, the optimizer, cost and taint analysis, and codegen. It compiles every valid example and runs `py_compile` on the output, checks every invalid example produces exactly its expected codes, and (if `langgraph` is installed) runs the generated files.
 
 ## The language in one example
 
