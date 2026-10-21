@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    proxy: { "/api": "http://localhost:8000" },
+    // AF_API_PORT lets a second copy run against another API server (default 8000)
+    proxy: { "/api": `http://localhost:${process.env.AF_API_PORT ?? 8000}` },
   },
 });

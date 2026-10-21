@@ -151,8 +151,10 @@ class Parser:
     def parse_field_decl(self) -> ast.FieldDecl:
         first = self.peek()
         modifier = None
+        untrusted = False
         if self.match(T.INPUT):
             modifier = "input"
+            untrusted = self.match(T.UNTRUSTED)
         elif self.match(T.OUTPUT):
             modifier = "output"
         name = self.expect(T.IDENT, "a field name").lexeme
@@ -161,7 +163,7 @@ class Parser:
         default = None
         if self.match(T.ASSIGN):
             default = self.parse_default()
-        return ast.FieldDecl(first.line, first.col, name, modifier, field_type, default)
+        return ast.FieldDecl(first.line, first.col, name, modifier, field_type, default, untrusted)
 
     def parse_default(self):
         """A literal, or [literal, ...] for list fields."""
@@ -201,7 +203,11 @@ class Parser:
                 params.append(self.parse_param())
         self.expect(T.RPAREN)
         self.expect(T.ARROW)
-        return ast.ToolDecl(kw.line, kw.col, name, params, self.parse_type())
+        return_type = self.parse_type()
+        tags = []
+        while self.check(T.UNTRUSTED, T.SENSITIVE, T.SANITIZER):
+            tags.append(self.advance().lexeme)
+        return ast.ToolDecl(kw.line, kw.col, name, params, return_type, tags)
 
     def parse_param(self) -> ast.Param:
         token = self.expect(T.IDENT, "a parameter name")

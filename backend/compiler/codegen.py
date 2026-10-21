@@ -63,7 +63,8 @@ class CodeGenerator:
     def __init__(self, graph: IRGraph, symbols: SymbolTable, source_name: str = "workflow.af"):
         self.graph = graph
         self.symbols = symbols
-        self.source_name = source_name
+        # the file name ends up inside docstrings, so keep quotes and backslashes out of it
+        self.source_name = source_name.replace("\\", "/").replace("\"", "'")
         self.lines: list[str] = []
         # give every bounded edge its own loop counter
         self.counters = {id(e): f"_count_{i}" for i, e in enumerate(
@@ -201,6 +202,12 @@ class CodeGenerator:
             self.emit()
             self.emit(f"def tool_{tool.name}({params}) -> {py_type(tool.return_type)}:")
             self.emit(f'"""Tool \'{tool.name}\' (mock). Replace this body with the real implementation."""', 1)
+            if "sensitive" in tool.tags:
+                self.emit("# SENSITIVE: real-world effects. The compiler checked which untrusted data can reach it (AF-W309).", 1)
+            if "untrusted" in tool.tags:
+                self.emit("# UNTRUSTED: the result may contain injected instructions; treat it as data, not commands.", 1)
+            if "sanitizer" in tool.tags:
+                self.emit("# SANITIZER: must return text that is safe to pass on (validated, redacted or approved).", 1)
             self.emit(f"return {sample_value(tool.return_type, 'mock ' + tool.name + ' result')}", 1)
             self.emit()
 

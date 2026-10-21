@@ -2,7 +2,7 @@
 
 How the compiler was tested, what testing found, and how to reproduce every result.
 
-**Summary:** 167 automated tests, all passing in about 28 seconds. Edge case testing, fuzzing and differential testing found **8 real bugs**, all fixed. After the fixes, more than 4,000 random and corrupted programs never made the compiler crash, and the verifier agreed exactly with an independent brute force checker on 480 random workflows.
+**Summary:** 210 automated tests, all passing in about 40 seconds. Edge case testing, fuzzing and differential testing found **8 real bugs**, all fixed. After the fixes, more than 4,000 random and corrupted programs never made the compiler crash, and the verifier agreed exactly with an independent brute force checker on 480 random workflows.
 
 Environment: Python 3.12.6, LangGraph 1.2.16, Windows 11.
 
@@ -27,11 +27,13 @@ All random tests use fixed seeds, so every run produces exactly the same program
 | `test_semantic.py` | 17 | every semantic error code, read/write/must-write inference; also runs from a hand written AST fixture |
 | `test_verify.py` | 13 | each verification pass on its own: reachability, SCC cycles, dataflow fixpoint, witness paths, else edges |
 | `test_codegen.py` | 7 | generated file structure, loop counters, dead agent removal, runs the generated workflows |
-| `test_examples.py` | 14 | every valid example compiles and passes `py_compile`; every invalid example gives exactly its expected codes |
+| `test_examples.py` | 19 | every valid example compiles and passes `py_compile`; every invalid example gives exactly its expected codes |
 | `test_api.py` | 3 | the `/api/compile` and `/api/examples` endpoints match the contract |
 | `test_edge_cases.py` | 75 | edge cases in every phase, including 8 tests that run unusual generated programs under LangGraph |
 | `test_fuzz.py` | 19 | mutation fuzzing, random garbage input, differential testing of the verifier |
-| **Total** | **167** | |
+| `test_cost.py` | 24 | dead LLM call elimination (liveness: loops, branches, edge conditions, chains, side effects) and static cost analysis (loops, branches, short circuits, unbounded loops), with differential testing against brute-force path enumeration |
+| `test_taint.py` | 14 | prompt-injection taint analysis: sources, propagation through llm and agents, sanitizers, clean overwrites, branches, loops, bool decisions |
+| **Total** | **210** | |
 
 ## 3. Testing methods
 
@@ -92,7 +94,15 @@ The two must agree **exactly** on the dead agents (W301), every (agent, field) r
 | workflows with no errors (code also checked) | 87 |
 | disagreements | **0** |
 
-### 3.5 Scale and performance
+### 3.5 Differential testing of the cost analysis
+240 random workflows are generated. For each one, every simple path from `start` to `end` is enumerated, and the number of LLM calls on each is counted directly from the source:
+- the **best case** must equal the cheapest path, always;
+- the **worst case** must equal the most expensive path when the workflow has no loops;
+- with loops, it must be at least the most expensive simple path, or unbounded.
+
+There were no disagreements.
+
+### 3.6 Scale and performance
 
 | Workflow | Result | Time |
 |---|---|---:|

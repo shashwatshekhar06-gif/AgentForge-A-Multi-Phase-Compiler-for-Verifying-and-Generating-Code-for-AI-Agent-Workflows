@@ -38,6 +38,7 @@ class FieldDecl(Node):
     modifier: Optional[str]   # "input", "output" or None
     field_type: str           # "string", "int", "bool", "list[string]", ...
     default: Optional[Union["Literal", list]] = None   # Literal, list of Literal, or None
+    untrusted: bool = False   # `input untrusted name: type`: the caller's text may contain injected instructions
 
 
 @dataclass
@@ -57,6 +58,7 @@ class ToolDecl(Node):
     name: str
     params: list[Param]
     return_type: str
+    tags: list = field(default_factory=list)   # "untrusted" (source), "sensitive" (sink), "sanitizer"
 
 
 @dataclass

@@ -1,1 +1,0 @@
-{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/monacosetup.ts","./src/types.ts","./src/components/asttab.tsx","./src/components/codetab.tsx","./src/components/graphtab.tsx","./src/components/phasebar.tsx","./src/components/skipped.tsx","./src/components/tokenstab.tsx","./src/components/verifytab.tsx"],"version":"5.6.3"}

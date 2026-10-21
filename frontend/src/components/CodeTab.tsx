@@ -31,7 +31,7 @@ export default function CodeTab({ phase }: { phase: CompileResult["phases"]["cod
         <Editor
           language="python"
           value={phase.code}
-          options={{ readOnly: true, fontSize: 14, minimap: { enabled: false }, scrollBeyondLastLine: false }}
+          options={{ readOnly: true, fontSize: 14, minimap: { enabled: false }, scrollBeyondLastLine: false, automaticLayout: true }}
         />
       </div>
     </div>

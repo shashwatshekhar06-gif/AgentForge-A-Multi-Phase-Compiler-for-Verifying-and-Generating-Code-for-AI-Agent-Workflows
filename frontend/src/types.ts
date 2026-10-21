@@ -31,6 +31,9 @@ export interface IrNode {
   must_writes: string[];
   status: "ok" | "warning" | "error";
   line: number;
+  llm_calls: number;    // most llm(...) calls one run of this agent can make
+  tool_calls: number;
+  removed_llm_calls: number;   // llm calls the optimizer removed from this agent
 }
 
 export interface IrEdge {
@@ -69,10 +72,29 @@ export interface CompileResult {
     };
     ir: { status: PhaseStatus; nodes: IrNode[]; edges: IrEdge[] };
     verify: { status: PhaseStatus; checks: Check[] };
-    optimize: { status: PhaseStatus; removed_agents: string[] };
+    optimize: {
+      status: PhaseStatus;
+      removed_agents: string[];
+      removed_stores: { agent: string; field: string; line: number; llm_calls_saved: number }[];
+    };
+    cost: CostPhase;
     codegen: { status: PhaseStatus; code: string };
   };
   diagnostics: Diagnostic[];
+}
+
+export interface CostCount {
+  llm: number | null;   // null = unbounded
+  tool: number | null;
+}
+
+export interface CostPhase {
+  status: PhaseStatus;
+  worst: CostCount;
+  best: CostCount;
+  agents: { id: string; llm_min: number; llm_max: number; tool_min: number; tool_max: number; max_visits: number | null }[];
+  unbounded_loops: string[][];
+  removed_llm_calls: number;
 }
 
 export interface Example {

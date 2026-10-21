@@ -1,0 +1,34 @@
+# expect: AF-W308
+# A writer / reviewer loop. It has an exit (the reviewer can approve), so it passes the
+# cycle check, but nothing limits how many times it can go round. If the reviewer never
+# approves, the workflow keeps paying for LLM calls forever.
+# The cost analysis reports that the worst-case number of LLM calls per run is UNBOUNDED.
+# Fix: write the loop edge as  reviewer -[not state.approved, max_iterations 3]-> writer
+
+state Essay {
+  input topic: string
+  draft: string
+  feedback: string = ""
+  approved: bool = false
+  output essay: string
+}
+
+agent writer {
+  state.draft = llm("Write or improve the essay", state.topic, state.feedback)
+}
+
+agent reviewer {
+  state.feedback = llm("Review this essay and list problems", state.draft)
+  state.approved = llm("Is the essay ready? yes or no", state.draft, state.feedback) == "yes"
+}
+
+agent publisher {
+  state.essay = state.draft
+}
+
+flow write_essay {
+  start -> writer -> reviewer
+  reviewer -[not state.approved]-> writer
+  reviewer -[else]-> publisher
+  publisher -> end
+}

@@ -1,0 +1,39 @@
+# expect: AF-W307
+# A blog post pipeline that pays for LLM calls whose results are never used.
+# The workflow is correct, so it still compiles, but the optimizer (liveness analysis)
+# removes the three wasted calls from the generated code and reports the saving:
+#   - researcher writes `keywords`, but nobody ever reads it
+#   - writer writes a `title`, but editor always overwrites it before anyone reads it
+#   - editor writes `tone`, but nobody ever reads it
+
+state Post {
+  input topic: string
+  notes: string
+  keywords: string
+  title: string
+  tone: string
+  draft: string
+  output article: string
+  output headline: string
+}
+
+agent researcher {
+  state.notes = llm("Collect key facts about the topic", state.topic)
+  state.keywords = llm("List SEO keywords for the topic", state.topic)      # wasted: never read
+}
+
+agent writer {
+  state.title = llm("Suggest a working title", state.topic)                  # wasted: always overwritten
+  state.draft = llm("Write a first draft from these notes", state.notes)
+}
+
+agent editor {
+  state.tone = llm("Describe the tone of this draft", state.draft)           # wasted: never read
+  state.article = llm("Edit this draft for clarity", state.draft)
+  state.title = llm("Write a catchy final title", state.article)
+  state.headline = state.title
+}
+
+flow publish {
+  start -> researcher -> writer -> editor -> end
+}

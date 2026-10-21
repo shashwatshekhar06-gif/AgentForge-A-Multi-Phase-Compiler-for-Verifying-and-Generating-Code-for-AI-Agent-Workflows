@@ -193,10 +193,11 @@ class TestSemanticEdges:
         body = 'agent x { state.r = llm("p") one_of ["a", "b"]\n state.a = "k" }'
         flow = 'start -> x\nx -[state.r == "zzz"]-> end\nx -[else]-> end'
         assert codes_of(prog(fields="r: string", decls=body, flow=flow)) == ["AF-W208"]
-        # a second, free-form write to r means "zzz" is possible, so no warning
+        # a second, free-form write to r means "zzz" is possible, so no AF-W208
+        # (y's write is always overwritten by x before anyone reads it, so the optimizer flags it: AF-W307)
         body2 = body + '\nagent y { state.r = state.q }'
         flow2 = 'start -> y -> x\nx -[state.r == "zzz"]-> end\nx -[else]-> end'
-        assert codes_of(prog(fields="r: string", decls=body2, flow=flow2)) == []
+        assert codes_of(prog(fields="r: string", decls=body2, flow=flow2)) == ["AF-W307"]
 
     def test_unknown_field_inside_edge_condition(self):
         assert codes_of(prog(flow='start -> x\nx -[state.nope == "a"]-> end\nx -[else]-> end')) == ["AF-E202"]

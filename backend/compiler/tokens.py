@@ -29,6 +29,9 @@ class TokenType(Enum):
     TRUE = auto()
     FALSE = auto()
     MAX_ITERATIONS = auto()
+    UNTRUSTED = auto()
+    SENSITIVE = auto()
+    SANITIZER = auto()
     STRING_TYPE = auto()
     INT_TYPE = auto()
     BOOL_TYPE = auto()
@@ -77,6 +80,9 @@ KEYWORDS = {
     "true": TokenType.TRUE,
     "false": TokenType.FALSE,
     "max_iterations": TokenType.MAX_ITERATIONS,
+    "untrusted": TokenType.UNTRUSTED,
+    "sensitive": TokenType.SENSITIVE,
+    "sanitizer": TokenType.SANITIZER,
     "string": TokenType.STRING_TYPE,
     "int": TokenType.INT_TYPE,
     "bool": TokenType.BOOL_TYPE,

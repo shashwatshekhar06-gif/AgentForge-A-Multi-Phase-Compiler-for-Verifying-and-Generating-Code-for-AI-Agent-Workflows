@@ -14,6 +14,7 @@ const PASS_INFO: Record<string, string> = {
   "State completeness": "forward dataflow analysis (definite assignment)",
   "Outputs written": "definite assignment checked at end",
   "Else edges": "every branching node should have a default",
+  "Prompt injection": "taint analysis: untrusted data reaching a sensitive tool",
 };
 
 export default function VerifyTab({ result }: { result: CompileResult }) {
@@ -58,12 +59,21 @@ export default function VerifyTab({ result }: { result: CompileResult }) {
       <h3 className="font-semibold mt-6 mb-2">Optimization</h3>
       {result.phases.optimize.status === "skipped" ? (
         <p className="text-sm text-slate-500">Skipped because verification failed.</p>
-      ) : removed.length ? (
-        <p className="text-sm">
-          Dead agent elimination removed <b>{removed.join(", ")}</b>. No code is generated for unreachable agents.
-        </p>
       ) : (
-        <p className="text-sm text-slate-600">Dead agent elimination: nothing to remove, every agent is reachable.</p>
+        <ul className="text-sm space-y-1 list-disc ml-5">
+          <li>
+            Dead agent elimination:{" "}
+            {removed.length ? <>removed <b>{removed.join(", ")}</b> (no code is generated for unreachable agents).</>
+              : "nothing to remove, every agent is reachable."}
+          </li>
+          <li>
+            Dead LLM call elimination (liveness analysis):{" "}
+            {(result.phases.optimize.removed_stores ?? []).length ? (
+              <>removed {(result.phases.optimize.removed_stores ?? []).map((r) => `${r.agent}: state.${r.field}`).join(", ")}.
+                See the Cost tab for the saving.</>
+            ) : "every computed value is used."}
+          </li>
+        </ul>
       )}
     </div>
   );
