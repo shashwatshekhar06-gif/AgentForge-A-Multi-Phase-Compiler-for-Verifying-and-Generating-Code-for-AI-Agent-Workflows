@@ -1,4 +1,4 @@
-# AgentForge
+# AgentForge -- A Multi-Phase Compiler for Verifying and Generating Code for AI Agent Workflows
 
 A compiler for a small language (`.af`) that describes multi-agent AI workflows. It structurally verifies the workflow before anything runs, then generates one runnable [LangGraph](https://github.com/langchain-ai/langgraph) Python file. A web UI shows the output of every compiler phase.
 
