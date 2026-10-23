@@ -1,0 +1,60 @@
+# Two versions of the answering step. `responder_a` is wired into the flow.
+# The compare block scores both versions on test questions and says which one is better.
+# In mock mode the answers are scripted (`mock`), so the result is the same on every run.
+# With AGENTFORGE_LLM=real the generated file asks a real model instead.
+
+state AgentState {
+  input query: string
+  context: list[string] = []
+  output response: string
+  route: string
+}
+
+tool web_search(query: string) -> list[string]
+
+agent classifier {
+  state.route = llm("Classify the query as factual or conversational", state.query) one_of ["factual", "conversational"]
+}
+
+agent researcher {
+  state.context = web_search(state.query)
+}
+
+agent responder_a {
+  state.response = llm("Answer the query in one short sentence", state.query)
+}
+
+agent responder_b {
+  state.response = llm("Answer the query using the context. Name the city.", state.query, state.context)
+}
+
+flow main {
+  start -> classifier
+  classifier -[state.route == "factual"]-> researcher
+  classifier -[else]-> responder_a
+  researcher -> responder_a
+  responder_a -> end
+}
+
+compare best_responder {
+  candidates responder_a, responder_b
+
+  case {
+    state.query = "What is the capital of France?"
+    expect state.response contains "Paris"
+    mock responder_a "The capital is Lyon."
+    mock responder_b "Paris is the capital of France."
+  }
+  case {
+    state.query = "What is the capital of Japan?"
+    expect state.response contains "Tokyo"
+    mock responder_a "Tokyo."
+    mock responder_b "Tokyo is the capital of Japan."
+  }
+  case {
+    state.query = "What is the capital of Spain?"
+    expect state.response contains "Madrid"
+    mock responder_a "It is Barcelona."
+    mock responder_b "Madrid is the capital of Spain."
+  }
+}

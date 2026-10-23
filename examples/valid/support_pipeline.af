@@ -1,5 +1,7 @@
 # Support ticket pipeline: branch on the language, merge again, then reply.
 # `translated` is written on BOTH branches, so the analyzer may safely read it.
+# A compare block scores the replier against a terse version. The replier already in the flow wins,
+# so the compiler keeps it (nothing is swapped without a reason).
 
 state Ticket {
   input message: string
@@ -38,6 +40,11 @@ agent replier {
   }
 }
 
+# a terse alternative to the replier
+agent replier_terse {
+  state.reply = llm("Reply in five words or fewer", state.summary)
+}
+
 flow support {
   start -> detector
   detector -[state.language != "en"]-> translator
@@ -45,4 +52,23 @@ flow support {
   translator -> analyzer
   passthrough -> analyzer
   analyzer -> replier -> end
+}
+
+compare best_replier {
+  candidates replier, replier_terse
+
+  case {
+    state.sentiment = "negative"
+    state.summary = "The order arrived broken."
+    expect state.reply contains "sorry"
+    mock replier "We are sorry the order arrived broken."
+    mock replier_terse "Noted."
+  }
+  case {
+    state.sentiment = "positive"
+    state.summary = "Great service, thank you."
+    expect state.reply contains "thank"
+    mock replier "Thank you for the kind words!"
+    mock replier_terse "Thanks."
+  }
 }

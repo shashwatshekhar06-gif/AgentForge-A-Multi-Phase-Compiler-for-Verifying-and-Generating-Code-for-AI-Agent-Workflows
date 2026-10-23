@@ -1,0 +1,53 @@
+# Built to be scored with a REAL model:  python -m compiler ../examples/valid/compare_real_model.af -o workflow.py --profile real
+# Both agents try to label a support message as urgent or normal. A later step can only use the label if it is
+# exactly "urgent" or "normal", so the test uses `==` (an exact match, not `contains`).
+# `triage_a` is wired into the flow with a loose prompt; `triage_b` asks for the label and nothing else.
+# Real models usually answer the loose prompt with a sentence ("This message is urgent."), which fails the exact check.
+# The `mock` lines only matter in mock mode (the default, and the web UI). With --profile real they are ignored.
+
+state TicketState {
+  input message: string
+  output priority: string
+}
+
+agent triage_a {
+  state.priority = llm("Say whether this support message is urgent or normal.", state.message)
+}
+
+agent triage_b {
+  state.priority = llm("Classify the support message. Reply with exactly one lowercase word and nothing else: urgent or normal.", state.message)
+}
+
+flow main {
+  start -> triage_a
+  triage_a -> end
+}
+
+compare best_triage {
+  candidates triage_a, triage_b
+
+  case {
+    state.message = "Our whole checkout page is down and customers cannot pay."
+    expect state.priority == "urgent"
+    mock triage_a "This message is urgent."
+    mock triage_b "urgent"
+  }
+  case {
+    state.message = "Could you tell me how to change my profile picture?"
+    expect state.priority == "normal"
+    mock triage_a "I would call this normal."
+    mock triage_b "normal"
+  }
+  case {
+    state.message = "I was charged twice for the same order and need it fixed today."
+    expect state.priority == "urgent"
+    mock triage_a "urgent"
+    mock triage_b "urgent"
+  }
+  case {
+    state.message = "Thanks, the update looks great!"
+    expect state.priority == "normal"
+    mock triage_a "Normal."
+    mock triage_b "normal"
+  }
+}

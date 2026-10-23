@@ -1,5 +1,7 @@
 # Fraud investigation: triage a transaction, analyse the transaction graph
 # (retrying up to 3 times while not confident), then write a report.
+# Two versions of the report writer compete; the compare block at the end picks the better one
+# and the compiler wires it into the generated code.
 
 state FraudCase {
   input transaction_id: string
@@ -32,6 +34,11 @@ agent report_writer {
   state.report = llm("Write a fraud report", state.transaction_id, state.risk, state.evidence, state.graph_score)
 }
 
+# a second version of the report writer, with a more demanding prompt
+agent report_writer_v2 {
+  state.report = llm("Write a fraud report that names the transaction id, the risk level and the strongest evidence", state.transaction_id, state.risk, state.evidence, state.graph_score)
+}
+
 flow investigate {
   start -> triage
   triage -[state.risk == "high"]-> graph_analyst
@@ -39,4 +46,24 @@ flow investigate {
   graph_analyst -[not state.confident, max_iterations 3]-> graph_analyst   # bounded retry loop
   graph_analyst -[else]-> report_writer
   report_writer -> end
+}
+
+compare best_report_writer {
+  candidates report_writer, report_writer_v2
+
+  case {
+    state.transaction_id = "TX-1001"
+    state.risk = "high"
+    state.graph_score = 82
+    expect state.report contains "TX-1001"
+    mock report_writer "Fraud report: this looks suspicious."
+    mock report_writer_v2 "Fraud report for TX-1001: high risk, three linked accounts."
+  }
+  case {
+    state.transaction_id = "TX-2002"
+    state.risk = "low"
+    expect state.report contains "low"
+    mock report_writer "Fraud report: low risk."
+    mock report_writer_v2 "Fraud report for TX-2002: low risk, no evidence found."
+  }
 }

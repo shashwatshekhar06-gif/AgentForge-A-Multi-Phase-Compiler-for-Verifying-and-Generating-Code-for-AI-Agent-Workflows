@@ -27,7 +27,7 @@ TOKEN_NAMES = {
     T.DOT: "'.'", T.ASSIGN: "'='", T.ARROW: "'->'", T.EDGE_OPEN: "'-['",
 }
 
-DECL_STARTS = {T.STATE, T.TOOL, T.AGENT, T.FLOW}
+DECL_STARTS = {T.STATE, T.TOOL, T.AGENT, T.FLOW, T.COMPARE, T.NECESSITY}
 
 # how deeply parentheses, `not` and if-blocks may nest; far beyond any real workflow,
 # and it keeps the recursive phases (and the generated Python) well inside their limits
@@ -107,7 +107,7 @@ class Parser:
         # `state` also appears inside agents as `state.x`, so only `state NAME` starts a declaration
         if self.check(T.STATE):
             return self.peek(1).type == T.IDENT
-        return self.check(T.TOOL, T.AGENT, T.FLOW)
+        return self.check(T.TOOL, T.AGENT, T.FLOW, T.COMPARE, T.NECESSITY)
 
     def synchronize(self):
         """Panic mode: skip tokens until the next declaration (or the end)."""
@@ -135,7 +135,11 @@ class Parser:
             return self.parse_agent_decl()
         if self.check(T.FLOW):
             return self.parse_flow_decl()
-        self.fail("AF-E101", f"expected a declaration (state, tool, agent or flow) but found {describe(self.peek())}",
+        if self.check(T.COMPARE):
+            return self.parse_compare_decl()
+        if self.check(T.NECESSITY):
+            return self.parse_necessity_decl()
+        self.fail("AF-E101", f"expected a declaration (state, tool, agent, flow, compare or necessity) but found {describe(self.peek())}",
                   self.peek())
 
     def parse_state_decl(self) -> ast.StateDecl:
@@ -304,6 +308,72 @@ class Parser:
         else:
             self.expect(T.ARROW, "'->' or '-['")
         return condition, is_default, max_iterations
+
+    # ---------- compare: several agents for the same job, scored on test cases ----------
+
+    def parse_compare_decl(self) -> ast.CompareDecl:
+        kw = self.expect(T.COMPARE)
+        name = self.expect(T.IDENT, "a compare name").lexeme
+        self.expect(T.LBRACE)
+        decl = ast.CompareDecl(kw.line, kw.col, name, [], [])
+        if self.check(T.CANDIDATES):
+            self.advance()
+            decl.candidates.append(self.parse_candidate())
+            while self.match(T.COMMA):
+                decl.candidates.append(self.parse_candidate())
+        else:
+            self.fail("AF-E101", f"expected 'candidates' but found {describe(self.peek())}", self.peek())
+        while self.check(T.END_TO_END, T.ENSURE):
+            token = self.advance()
+            if token.type == T.END_TO_END:
+                decl.end_to_end = True
+            else:
+                decl.ensure = self.parse_expr()
+        while self.check(T.CASE):
+            decl.cases.append(self.parse_case())
+        self.expect(T.RBRACE)
+        return decl
+
+    def parse_necessity_decl(self) -> ast.NecessityDecl:
+        kw = self.expect(T.NECESSITY)
+        name = self.expect(T.IDENT, "a necessity name").lexeme
+        self.expect(T.LBRACE)
+        decl = ast.NecessityDecl(kw.line, kw.col, name, [])
+        while self.check(T.CASE):
+            decl.cases.append(self.parse_case())
+        self.expect(T.RBRACE)
+        return decl
+
+    def parse_candidate(self) -> ast.CandidateRef:
+        token = self.expect(T.IDENT, "an agent name")
+        return ast.CandidateRef(token.line, token.col, token.lexeme)
+
+    def parse_case(self) -> ast.CompareCase:
+        kw = self.expect(T.CASE)
+        self.expect(T.LBRACE)
+        case = ast.CompareCase(kw.line, kw.col, [], [], [])
+        while not self.check(T.RBRACE, T.EOF) and not self.at_declaration_start():
+            token = self.peek()
+            if self.check(T.STATE):
+                target = self.parse_state_ref()
+                self.expect(T.ASSIGN)
+                case.inputs.append(ast.Assign(target.line, target.col, target, self.parse_default()))
+            elif self.match(T.EXPECT):
+                target = self.parse_state_ref()
+                if self.check(T.CONTAINS, T.EQ):
+                    op = "==" if self.advance().type == T.EQ else "contains"
+                else:
+                    self.fail("AF-E101", f"expected 'contains' or '==' but found {describe(self.peek())}", self.peek())
+                case.expects.append(ast.Expect(token.line, token.col, target, op, self.parse_literal()))
+            elif self.match(T.MOCK):
+                agent = self.expect(T.IDENT, "an agent name").lexeme
+                text = self.expect(T.STRING, "the scripted answer (a string)").lexeme
+                case.mocks.append(ast.MockAnswer(token.line, token.col, agent, text))
+            else:
+                self.fail("AF-E101", f"expected state.field = ..., expect or mock inside a case but found "
+                                     f"{describe(token)}", token)
+        self.expect(T.RBRACE)
+        return case
 
     # ---------- expressions (lowest precedence first) ----------
 

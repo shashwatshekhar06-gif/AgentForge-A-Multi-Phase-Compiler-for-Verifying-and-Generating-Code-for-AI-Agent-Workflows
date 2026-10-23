@@ -68,6 +68,49 @@ class AgentDecl(Node):
 
 
 @dataclass
+class CandidateRef(Node):
+    name: str
+
+
+@dataclass
+class Expect(Node):
+    """`expect state.response contains "Paris"`: how one test case judges an agent's output."""
+    target: "StateRef"
+    op: str               # "contains" or "=="
+    value: "Literal"
+
+
+@dataclass
+class MockAnswer(Node):
+    """`mock responder_a "The capital is Lyon"`: the scripted answer used in mock mode."""
+    agent: str
+    text: str
+
+
+@dataclass
+class CompareCase(Node):
+    inputs: list = field(default_factory=list)    # Assign nodes: the state this test case starts from
+    expects: list = field(default_factory=list)   # Expect nodes (exactly one is required)
+    mocks: list = field(default_factory=list)     # MockAnswer nodes
+
+
+@dataclass
+class CompareDecl(Node):
+    name: str
+    candidates: list = field(default_factory=list)   # CandidateRef nodes: agents that compete for the same job
+    cases: list = field(default_factory=list)        # CompareCase nodes
+    end_to_end: bool = False                         # judge each candidate on the FINAL output of the whole workflow
+    ensure: Optional["Expr"] = None                  # checked at run time after the wired agent; failing falls back to the next candidate
+
+
+@dataclass
+class NecessityDecl(Node):
+    """`necessity trim { case { ... } }`: test cases used to find out which agents the workflow can do without."""
+    name: str
+    cases: list = field(default_factory=list)        # CompareCase nodes (inputs and one expect; mocks are not allowed)
+
+
+@dataclass
 class Edge(Node):
     source: str
     target: str
@@ -146,6 +189,7 @@ Expr = Union[Literal, StateRef, Call, LlmCall, BinaryOp, UnaryOp]
 NODE_CLASSES = {cls.__name__: cls for cls in [
     Program, StateDecl, FieldDecl, ToolDecl, Param, AgentDecl, Assign, If,
     Literal, StateRef, Call, LlmCall, BinaryOp, UnaryOp, FlowDecl, Edge,
+    CompareDecl, CompareCase, CandidateRef, Expect, MockAnswer, NecessityDecl,
 ]}
 
 

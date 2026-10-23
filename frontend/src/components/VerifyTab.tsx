@@ -61,6 +61,18 @@ export default function VerifyTab({ result }: { result: CompileResult }) {
         <p className="text-sm text-slate-500">Skipped because verification failed.</p>
       ) : (
         <ul className="text-sm space-y-1 list-disc ml-5">
+          {(result.phases.optimize.selected ?? []).length > 0 && (
+            <li>
+              Agent selection (profile-guided):{" "}
+              {(result.phases.optimize.selected ?? []).map((s) => (
+                <span key={s.compare}>
+                  <b>{s.with}</b> replaces <b>{s.replaced}</b> in compare <b>{s.compare}</b> (
+                  {Object.entries(s.scores).map(([a, v]) => `${a} ${v}`).join(", ")}; {s.profile === "mock" ? "scripted answers" : "real model"}).{" "}
+                </span>
+              ))}
+              See the Evaluation tab.
+            </li>
+          )}
           <li>
             Dead agent elimination:{" "}
             {removed.length ? <>removed <b>{removed.join(", ")}</b> (no code is generated for unreachable agents).</>

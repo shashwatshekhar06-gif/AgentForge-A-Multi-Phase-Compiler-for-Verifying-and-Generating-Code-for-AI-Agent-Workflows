@@ -1,0 +1,33 @@
+# expect: AF-W310
+# responder_a is safe. responder_b would be the better answerer, but it passes the customer's
+# untrusted message straight into the sensitive tool `issue_refund`. The compiler warns that
+# choosing it would open a prompt-injection path (the warning shows the exact chain).
+
+state S {
+  input untrusted message: string
+  output reply: string
+}
+
+tool issue_refund(note: string) -> string sensitive
+
+agent responder_a {
+  state.reply = llm("Write a polite reply", state.message)
+}
+
+agent responder_b {
+  state.reply = issue_refund(state.message)
+}
+
+flow main {
+  start -> responder_a -> end
+}
+
+compare best_responder {
+  candidates responder_a, responder_b
+  case {
+    state.message = "Please refund my order"
+    expect state.reply contains "refund"
+    mock responder_a "Thanks, we will look into it."
+    mock responder_b "refund issued"
+  }
+}

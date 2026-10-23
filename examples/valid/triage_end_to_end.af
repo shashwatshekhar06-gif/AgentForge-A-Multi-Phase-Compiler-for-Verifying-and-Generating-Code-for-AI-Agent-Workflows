@@ -1,0 +1,72 @@
+# A bad answer from one agent damages every agent after it. Here the label decides which branch runs:
+# only the exact word "urgent" reaches `escalate`; a sentence like "This message is urgent." falls into the
+# else branch, so an urgent ticket silently goes to the normal queue.
+#
+#   end_to_end  each test case runs the WHOLE workflow with a candidate in place, and the final `action` is judged,
+#               so a candidate is scored by what it does to the agents after it, not only by its own text.
+#   ensure      a run-time check on the wired agent. With a real model, an answer that is not exactly "urgent" or
+#               "normal" makes the run try the other candidate instead of passing a bad label on.
+#
+# Score it with a real model:  python -m compiler ../examples/valid/triage_end_to_end.af -o workflow.py --profile real
+# (the `mock` lines are only used in mock mode, the default)
+
+state TicketState {
+  input message: string
+  priority: string
+  output action: string
+}
+
+agent triage_a {
+  state.priority = llm("Say whether this support message is urgent or normal.", state.message)
+}
+
+agent triage_b {
+  state.priority = llm("Classify the support message. Reply with exactly one lowercase word and nothing else: urgent or normal.", state.message)
+}
+
+agent escalate {
+  state.action = "escalated"
+}
+
+agent enqueue {
+  state.action = "queued"
+}
+
+flow main {
+  start -> triage_a
+  triage_a -[state.priority == "urgent"]-> escalate
+  triage_a -[else]-> enqueue
+  escalate -> end
+  enqueue -> end
+}
+
+compare best_triage {
+  candidates triage_a, triage_b
+  end_to_end
+  ensure state.priority == "urgent" or state.priority == "normal"
+
+  case {
+    state.message = "Our whole checkout page is down and customers cannot pay."
+    expect state.action == "escalated"
+    mock triage_a "This message is urgent."
+    mock triage_b "urgent"
+  }
+  case {
+    state.message = "Could you tell me how to change my profile picture?"
+    expect state.action == "queued"
+    mock triage_a "normal"
+    mock triage_b "normal"
+  }
+  case {
+    state.message = "I was charged twice for the same order and need it fixed today."
+    expect state.action == "escalated"
+    mock triage_a "urgent"
+    mock triage_b "urgent"
+  }
+  case {
+    state.message = "Thanks, the update looks great!"
+    expect state.action == "queued"
+    mock triage_a "Normal."
+    mock triage_b "normal"
+  }
+}

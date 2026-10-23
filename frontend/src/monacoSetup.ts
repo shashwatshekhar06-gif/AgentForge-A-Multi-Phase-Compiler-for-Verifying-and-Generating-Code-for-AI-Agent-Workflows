@@ -18,7 +18,8 @@ monaco.languages.register({ id: "agentforge" });
 
 monaco.languages.setMonarchTokensProvider("agentforge", {
   keywords: ["state", "tool", "agent", "flow", "start", "end", "input", "output", "llm", "one_of",
-             "if", "else", "and", "or", "not", "max_iterations", "untrusted", "sensitive", "sanitizer"],
+             "if", "else", "and", "or", "not", "max_iterations", "untrusted", "sensitive", "sanitizer",
+             "compare", "candidates", "case", "expect", "contains", "mock", "end_to_end", "ensure", "necessity"],
   typeKeywords: ["string", "int", "bool", "list"],
   constants: ["true", "false"],
   tokenizer: {

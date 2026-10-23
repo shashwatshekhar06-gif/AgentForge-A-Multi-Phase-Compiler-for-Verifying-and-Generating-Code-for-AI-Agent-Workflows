@@ -32,6 +32,15 @@ class TokenType(Enum):
     UNTRUSTED = auto()
     SENSITIVE = auto()
     SANITIZER = auto()
+    COMPARE = auto()
+    CANDIDATES = auto()
+    CASE = auto()
+    EXPECT = auto()
+    CONTAINS = auto()
+    MOCK = auto()
+    END_TO_END = auto()
+    NECESSITY = auto()
+    ENSURE = auto()
     STRING_TYPE = auto()
     INT_TYPE = auto()
     BOOL_TYPE = auto()
@@ -83,6 +92,15 @@ KEYWORDS = {
     "untrusted": TokenType.UNTRUSTED,
     "sensitive": TokenType.SENSITIVE,
     "sanitizer": TokenType.SANITIZER,
+    "compare": TokenType.COMPARE,
+    "candidates": TokenType.CANDIDATES,
+    "case": TokenType.CASE,
+    "expect": TokenType.EXPECT,
+    "contains": TokenType.CONTAINS,
+    "mock": TokenType.MOCK,
+    "end_to_end": TokenType.END_TO_END,
+    "necessity": TokenType.NECESSITY,
+    "ensure": TokenType.ENSURE,
     "string": TokenType.STRING_TYPE,
     "int": TokenType.INT_TYPE,
     "bool": TokenType.BOOL_TYPE,

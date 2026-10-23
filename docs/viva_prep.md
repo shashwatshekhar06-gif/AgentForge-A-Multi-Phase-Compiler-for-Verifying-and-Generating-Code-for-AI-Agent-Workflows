@@ -422,12 +422,45 @@ The difference is what we optimize. Real compilers save CPU **cycles**. We save 
 - **Q: Is the generated code readable?**
   A: Yes, by design. It has one function per agent, source line references, comments and a fixed section order. A developer should be able to maintain it.
 
+### Choosing the better agent (`compare`)
+- **Q: Your compiler proves the workflow is correct. How do you know which agent gives the better answer?**
+  A: It cannot know that by looking at the code, because the answer depends on the model. So we treat it like profile-guided optimization (PGO) in an ordinary compiler: measure, then compile with the measurements. A `compare` block lists agents that do the same job and test cases. The compiler (1) proves each candidate could replace the one in the flow without breaking anything it verified, (2) scores them on the test cases, and (3) the optimizer wires the winner into the generated LangGraph code.
+- **Q: Why is this part of the optimizer and not a separate tool?**
+  A: Because it changes the generated code. It runs before dead-agent removal, cost analysis and code generation, so they all see the agent that will really run. For example if the winner makes two LLM calls instead of one, the worst-case cost bound already says two.
+- **Q: How does the swap check work?**
+  A: For every other candidate we build a copy of the graph with that candidate standing where the wired agent stood and run the whole verification again. Any problem that is new compared with the original graph is reported (AF-E216 error, AF-W310 warning). It reuses definite assignment and the taint analysis, so it adds no new theory. A winner that would add a warning is never applied automatically.
+- **Q: Is the scoring real or fake?**
+  A: By default it is a mock profile: the answer each candidate gives is scripted in the test case (`mock responder_a "..."`), so it is offline and repeatable but only shows the mechanism. With `python -m compiler file.af -o workflow.py --profile real` and an OpenAI or Anthropic key set in the terminal, the compiler runs the test cases against a real model, then recompiles with the measured scores. That is the real PGO loop. It makes paid API calls, only when asked.
+- **Q: Does it work for every workflow?**
+  A: For any workflow where the developer writes a `compare` block, yes (`fraud.af`, `support_pipeline.af`, `compare_agents.af`, `compare_real_model.af` and `triage_end_to_end.af` have one). The compiler cannot invent alternative agents or test cases, so it is opt-in per place where there is a real choice.
+- **Q: What does "best" mean, and what if there is a tie?**
+  A: The candidate with the most passed test cases. `contains` ignores letter case, `==` is exact. On a tie the agent already in the flow is kept, so nothing is swapped without a reason. `--no-select` turns the optimization off.
+- **Q: What are the limits?**
+  A: The selection is only as good as the test cases. With the mock profile the winner is decided by scripted answers, so say that plainly. Only blocks with exactly one wired candidate are swapped.
+
+- **Q: If an agent gives a bad answer, doesn't it ruin everything after it?**
+  A: Yes, a bad value flows to every later agent, so the damage is semantic, not a crash. Two features address it. `end_to_end` judges a candidate by the final output of the whole workflow instead of its own text. `ensure` is a run-time check on the wired agent: with a real model, a bad answer makes the run try the other candidates, and if none passes it stops. In `triage_end_to_end.af` a loose prompt answers "This message is urgent.", the router does not match it and an urgent ticket is queued; with a real model the loose agent scored 2/4 and the strict one 4/4.
+- **Q: What if the query comes from the user at run time?**
+  A: The test cases are fixed inputs written at compile time, like a validation set. The compiler picks the agent that does best on them, and every real query then goes through that agent. Nothing is re-optimised per query, so the choice is only as good as the cases are representative.
+- **Q: Is `ensure` checked at compile time?**
+  A: Its type is (it must be a bool over declared fields, no calls). Whether an answer satisfies it can only be known when a model answers, so it runs at run time, and only for real-model answers (mock placeholders would always fail it).
+- **Q: Can the web UI call the model?**
+  A: Only through one guarded button. `/api/compile` never calls a model. `/api/compile-real` works only while the server has a key, is capped at 60 calls and one run at a time, and the UI shows the call count and asks before running. The key stays on the server.
+
+- **Q: How do you know which agents are needed and which are not?**
+  A: That cannot be read from the program, so it is measured, like agent selection. A `necessity` block holds test cases. With a real model the compiler runs the whole workflow on each case as written and then with each agent left out; if the final output is no worse without an agent, that agent is not needed and the optimizer removes it from the generated code. In `necessity_demo.af` the reviewer was not needed (3/3 without it) and the drafter was (0/3), so the generated workflow has one LLM call fewer per run.
+- **Q: Why not just test every agent?**
+  A: Some can be decided without a model. If skipping an agent breaks verification (a later agent reads a field only it writes) the program proves it is needed, so no paid call is spent. Agents that call a tool are never removed automatically, because tools are stubs here and can have real effects, so a measurement could not be trusted. Agents that choose the next step cannot be skipped at all.
+- **Q: Could pruning remove something important?**
+  A: Only for the cases that were tried, so it is as good as the test cases. It never prunes when the workflow as written passes no case, it re-runs verification on every removal and refuses one that would add a problem, and `--no-select` turns it off. Agents are tested one at a time, greedily, the most expensive first.
+
 ### Testing
 - **Q: How do you know the compiler is correct?**
-  A: 210 automated tests: unit tests per phase, every example file, 75 edge cases, and mutation fuzzing (random corruptions must never crash the compiler). The cost analysis is checked against brute-force enumeration of all paths. The tests found 8 real bugs, all fixed and documented in `docs/testing.md`.
+  A: 342 automated tests: unit tests per phase, every example file, 75 edge cases, and mutation fuzzing (random corruptions must never crash the compiler). The cost analysis is checked against brute-force enumeration of all paths. The tests found 8 real bugs, all fixed and documented in `docs/testing.md`.
 
 ### Limitations: say them before you are asked
-- The `llm` and tools are mocks. Connecting a real model means replacing one function body, which is deliberately left to the user.
+- The `llm` and tools are mocks by default. A real model is one switch (`AGENTFORGE_LLM=real` with `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`); tools stay mocks that the user replaces.
+- Which agent gives the *better answer* is a run-time question. The compiler proves a swap is safe and builds the scoring harness; the scores are only as meaningful as the test cases (and, in mock mode, the scripted answers). Scores are per agent unless the block says `end_to_end`, and `ensure` only guards the wired agent at run time, with a real model.
 - There is no parallel fan-out yet: agents run one after another.
 - Cost is counted in *calls*, not tokens. Token counts depend on the runtime text.
 - Taint analysis tracks only explicit flows.

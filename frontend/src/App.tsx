@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
-import { compileSource, fetchExamples } from "./api";
+import { compileReal, compileSource, fetchExamples, fetchRealProfile, type RealProfileStatus } from "./api";
 import type { CompileResult, Example } from "./types";
 import PhaseBar from "./components/PhaseBar";
 import TokensTab from "./components/TokensTab";
@@ -10,9 +10,10 @@ import GraphTab from "./components/GraphTab";
 import VerifyTab from "./components/VerifyTab";
 import CodeTab from "./components/CodeTab";
 import CostTab from "./components/CostTab";
+import EvaluationTab from "./components/EvaluationTab";
 import ProblemsPanel from "./components/ProblemsPanel";
 
-const TABS = ["Tokens", "AST", "Graph", "Verification", "Cost", "Generated code"] as const;
+const TABS = ["Tokens", "AST", "Graph", "Verification", "Cost", "Evaluation", "Generated code"] as const;
 type Tab = (typeof TABS)[number];
 
 const STARTER = `# Write an AgentForge workflow here, or pick an example above.
@@ -45,6 +46,11 @@ export default function App() {
     }
   });
   const leftRef = useRef<HTMLElement>(null);
+  // agents named in a compare block (a stable array, so the graph is not rebuilt on every render)
+  const candidates = useMemo(
+    () => (result?.phases.semantic.symbols.compares ?? []).flatMap((c) => c.candidates),
+    [result],
+  );
 
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
@@ -61,6 +67,25 @@ export default function App() {
       setServerError(`Could not reach the compiler API (${(e as Error).message}). Is the backend running on port 8000?`);
     } finally {
       setBusy(false);
+    }
+  }, []);
+
+  // measuring compare candidates with a real model: only offered when the server has a key
+  const [real, setReal] = useState<RealProfileStatus>({ available: false, max_calls: 0 });
+  const [measuring, setMeasuring] = useState(false);
+  const [measureError, setMeasureError] = useState<string | null>(null);
+  useEffect(() => {
+    fetchRealProfile().then(setReal).catch(() => setReal({ available: false, max_calls: 0 }));
+  }, []);
+  const measure = useCallback(async () => {
+    setMeasuring(true);
+    setMeasureError(null);
+    try {
+      setResult(await compileReal(sourceRef.current));
+    } catch (e) {
+      setMeasureError((e as Error).message);
+    } finally {
+      setMeasuring(false);
     }
   }, []);
 
@@ -162,12 +187,14 @@ export default function App() {
     <div className="h-full flex flex-col">
       {/* header */}
       <header className="flex items-center gap-4 px-5 py-3 bg-white border-b border-slate-200">
-        <h1 className="text-xl font-bold tracking-tight">
-          Agent<span className="text-violet-600">Forge</span>
-        </h1>
-        <span className="text-sm text-slate-500 hidden md:inline">
-          a compiler that structurally verifies multi-agent workflows and generates LangGraph code
-        </span>
+        <div className="min-w-0">
+          <h1 className="text-base lg:text-lg font-bold tracking-tight leading-tight">
+            <span className="text-violet-600">AgentForge:</span> A Multi-Phase Compiler for Verifying and Generating Code for AI Agent Workflows
+          </h1>
+          <p className="text-xs text-slate-500 hidden md:block">
+            a compiler that structurally verifies multi-agent workflows and generates LangGraph code
+          </p>
+        </div>
         <div className="ml-auto flex items-center gap-3">
           <select
             className="border border-slate-300 rounded-md px-2 py-1.5 text-sm bg-white"
@@ -247,6 +274,7 @@ export default function App() {
               <GraphTab
                 phase={result.phases.ir}
                 removed={result.phases.optimize.removed_agents}
+                candidates={candidates}
                 diagnostics={result.diagnostics}
                 onSelect={revealLine}
               />
@@ -254,6 +282,14 @@ export default function App() {
               <VerifyTab result={result} />
             ) : tab === "Cost" ? (
               <CostTab result={result} />
+            ) : tab === "Evaluation" ? (
+              <EvaluationTab
+                result={result}
+                real={real}
+                measuring={measuring}
+                measureError={measureError}
+                onMeasure={measure}
+              />
             ) : (
               <CodeTab phase={result.phases.codegen} />
             )}

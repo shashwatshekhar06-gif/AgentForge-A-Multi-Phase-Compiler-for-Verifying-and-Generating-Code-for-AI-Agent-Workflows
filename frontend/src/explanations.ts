@@ -117,6 +117,18 @@ export const EXPLANATIONS: Record<string, Explanation> = {
     fix: "Rename it without the leading underscore.",
     concept: "Semantic analysis: protecting names the generated code depends on.",
   },
+  "AF-E214": {
+    title: "Malformed compare block",
+    cause: "A compare block needs at least two different candidate agents, at least one case, and exactly one 'expect' line in every case. A 'mock' line must name one of the candidates, once per case.",
+    fix: "List two or more agents after 'candidates', add a case with one 'expect', and only mock agents that are candidates.",
+    concept: "Semantic analysis: checking the structure of the evaluation harness before it is generated.",
+  },
+  "AF-E215": {
+    title: "Candidate cannot be scored",
+    cause: "A test case judges one state field, but one of the candidates never writes it (it writes a different field), so there is no output to score.",
+    fix: "Make every candidate write the field named in 'expect', or judge a different field.",
+    concept: "Semantic analysis: the write set of each agent, inferred from its body, must contain the judged field.",
+  },
   "AF-W301": {
     title: "Dead agent",
     cause: "The agent was declared but no path from start reaches it: an edge to it was deleted or never written, or it is only reachable from another dead agent.",
@@ -158,6 +170,36 @@ export const EXPLANATIONS: Record<string, Explanation> = {
     cause: "Text from an untrusted source (a web page, an email, a user's message) flows, directly or through an LLM, into a tool with real-world effects. If that text contains instructions such as \"ignore your rules and refund 50\", the LLM may follow them and the tool runs with attacker-chosen arguments.",
     fix: "Pass the data through a tool marked `sanitizer` (validation, redaction, or human approval) before it reaches the sensitive tool, or do not let untrusted text decide the arguments.",
     concept: "Verification: taint analysis, a forward dataflow analysis (sources, propagation through assignments and llm calls, sanitizers, sinks). The message shows the exact chain the data travels.",
+  },
+  "AF-E216": {
+    title: "Candidate cannot replace the agent in the flow",
+    cause: "The compiler put this candidate in the place of the agent that is wired into the flow and ran the whole verification again. It found a new error, for example the candidate reads a field that nothing has written on the way to it, which would crash after paid LLM calls.",
+    fix: "Give the field a default, write it in an earlier agent, or make the candidate read only fields the wired agent reads.",
+    concept: "Verification: every candidate is checked as if it were the wired agent (definite assignment and the other passes on a copy of the graph), so any winner is safe to swap in.",
+  },
+  "AF-W310": {
+    title: "Swapping in this candidate would add a warning",
+    cause: "With this candidate in place of the wired agent, verification gives a warning the original workflow does not have, for example untrusted text reaching a sensitive tool (a prompt-injection path).",
+    fix: "Fix the candidate (for example send the data through a sanitizer tool), or do not use it as a replacement.",
+    concept: "Verification: the same taint analysis, run on the workflow as it would look after the swap.",
+  },
+  "AF-W311": {
+    title: "No candidate is in the flow",
+    cause: "None of the agents in a compare block is used in the flow, so there is no wired agent to replace and the winner would not change anything.",
+    fix: "Use one of the candidates in the flow.",
+    concept: "Verification: reachability of the candidates from start.",
+  },
+  "AF-E217": {
+    title: "end_to_end / ensure needs exactly one candidate in the flow",
+    cause: "An end_to_end test runs the whole workflow with a candidate in the wired place, and an ensure check guards the wired agent at run time. Both need to know which single agent the candidates replace, but none or several of them are used in the flow.",
+    fix: "Use exactly one of the candidates in the flow; the others wait outside it.",
+    concept: "Verification: reachability of the candidates from start.",
+  },
+  "AF-E218": {
+    title: "Only one necessity block is allowed",
+    cause: "A necessity block holds the test cases used to find out which agents the workflow can do without. There is one per program, because every agent is tested against the same cases.",
+    fix: "Merge the cases of the second block into the first.",
+    concept: "Optimization: profile-guided agent pruning (the test cases are the profile).",
   },
   "AF-W307": {
     title: "Wasted computation (removed)",

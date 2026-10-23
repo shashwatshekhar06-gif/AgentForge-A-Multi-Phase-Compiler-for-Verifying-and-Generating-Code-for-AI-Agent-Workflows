@@ -2,6 +2,7 @@
 
 Each pass is a separate function that returns (checks, diagnostics):
   - check_reachability   : dead agents (not reachable from start)             AF-W301
+                           (candidates of a `compare` block are exempt: they wait outside the flow on purpose)
   - check_cycles         : cycles with no exit and no max_iterations bound    AF-E303
   - check_reach_end      : nodes that can never reach end                     AF-E305
   - check_state_completeness : fields read before they are surely written      AF-E302, AF-E304
@@ -105,11 +106,12 @@ def strongly_connected_components(graph: IRGraph) -> list:
 
 # ---------- pass 1: reachability (dead agents) ----------
 
-def check_reachability(graph: IRGraph):
+def check_reachability(graph: IRGraph, exempt: frozenset = frozenset()):
+    """`exempt` = agents that are not in the flow on purpose: candidates of a compare block."""
     reachable = reachable_from(graph, "start")
     diagnostics, checks = [], []
     for node in graph.nodes.values():
-        if node.kind == "agent" and node.id not in reachable:
+        if node.kind == "agent" and node.id not in reachable and node.id not in exempt:
             msg = f"agent '{node.id}' can never run: no path from start reaches it (it will be removed)"
             diagnostics.append(warning("AF-W301", "verify", msg, node.line, 1, node=node.id))
             checks.append(make_check("Dead agents", "warn", msg))
@@ -294,7 +296,7 @@ def verify(graph: IRGraph, symbols: SymbolTable):
     """Run every pass. Returns (checks, diagnostics)."""
     checks, diagnostics = [], []
 
-    c, d = check_reachability(graph)
+    c, d = check_reachability(graph, frozenset(symbols.candidate_names()))
     checks += c
     diagnostics += d
 

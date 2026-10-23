@@ -11,7 +11,7 @@ import Skipped from "./Skipped";
 
 // ---------- data attached to nodes and edges ----------
 
-type NodeData = { ir: IrNode; removed: boolean; dimmed: boolean; onPath: boolean; direction: Direction };
+type NodeData = { ir: IrNode; removed: boolean; candidate: boolean; dimmed: boolean; onPath: boolean; direction: Direction };
 type EdgeKind = "plain" | "conditional" | "else" | "loop";
 type EdgeData = {
   route: EdgeRoute; direction: Direction; span: number; offset: number; kind: EdgeKind; text?: string; dimmed: boolean; highlighted: boolean;
@@ -33,7 +33,7 @@ const EDGE_COLORS: Record<EdgeKind, string> = {
 // ---------- node ----------
 
 function AgentNode({ data }: NodeProps<Node<NodeData>>) {
-  const { ir, removed, dimmed, onPath, direction } = data;
+  const { ir, removed, candidate, dimmed, onPath, direction } = data;
   // where edges attach: forward edges in/out, loop-back arcs on one side, self loops on another
   const lr = direction === "LR";
   const handles = (
@@ -70,7 +70,7 @@ function AgentNode({ data }: NodeProps<Node<NodeData>>) {
     <div className={`group relative transition-opacity duration-200 ${fade}`}>
       {handles}
       <div style={{ width: NODE_WIDTH }} className={`border-2 rounded-xl shadow-sm px-3.5 py-2.5 ${style.box} ${ring} ${
-        removed ? "opacity-50 border-dashed" : ""}`}>
+        removed ? "opacity-50 border-dashed" : candidate ? "border-dashed" : ""}`}>
         <div className="flex items-center gap-2">
           <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${style.dot}`} />
           <span className="font-semibold text-slate-800 truncate">{ir.id}</span>
@@ -88,6 +88,9 @@ function AgentNode({ data }: NodeProps<Node<NodeData>>) {
           )}
         </div>
         {removed && <div className="text-[10px] font-medium text-slate-500 mt-0.5">dead: removed by optimizer</div>}
+        {candidate && !removed && (
+          <div className="text-[10px] font-medium text-violet-600 mt-0.5">candidate: scored in the Evaluation tab</div>
+        )}
       </div>
       <div className="hidden group-hover:block absolute z-50 left-1/2 -translate-x-1/2 top-full mt-2 w-64 bg-slate-800 text-white text-xs rounded-lg p-2.5 shadow-xl">
         <div><span className="text-sky-300 font-semibold">reads</span> {ir.reads.join(", ") || "nothing"}</div>
@@ -217,6 +220,7 @@ function offsets(edges: IrEdge[], routes: EdgeRoute[]): number[] {
 interface Props {
   phase: CompileResult["phases"]["ir"];
   removed: string[];
+  candidates?: string[];   // agents of compare blocks (they may wait outside the flow on purpose)
   diagnostics: Diagnostic[];
   onSelect: (line: number, col: number) => void;
 }
@@ -226,7 +230,7 @@ interface CanvasProps extends Props {
   onToggleFullscreen: () => void;
 }
 
-function GraphCanvas({ phase, removed, diagnostics, onSelect, fullscreen, onToggleFullscreen }: CanvasProps) {
+function GraphCanvas({ phase, removed, candidates = [], diagnostics, onSelect, fullscreen, onToggleFullscreen }: CanvasProps) {
   const { fitView } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -257,9 +261,9 @@ function GraphCanvas({ phase, removed, diagnostics, onSelect, fullscreen, onTogg
       id: n.id,
       type: "agent",
       position: layout.positions.get(n.id)!,
-      data: { ir: n, removed: removed.includes(n.id), dimmed: false, onPath: false, direction: layout.direction },
+      data: { ir: n, removed: removed.includes(n.id), candidate: candidates.includes(n.id), dimmed: false, onPath: false, direction: layout.direction },
     })));
-  }, [phase, layout, removed, setNodes]);
+  }, [phase, layout, removed, candidates, setNodes]);
   useEffect(() => setPathIndex(-1), [phase]);
 
   // auto zoom: fit the whole graph whenever the program changes or the panel is resized

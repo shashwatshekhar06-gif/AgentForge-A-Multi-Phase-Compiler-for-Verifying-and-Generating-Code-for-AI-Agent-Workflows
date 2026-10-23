@@ -1,0 +1,47 @@
+# Which of these agents does the workflow actually need? Each one costs a paid LLM call on every run.
+# The `necessity` block holds test cases. With a real model the compiler runs the whole workflow on every case, once
+# as written and once with each agent skipped. An agent whose removal leaves the final output no worse is not needed,
+# and the optimizer drops it from the generated code.
+#
+#   python -m compiler ../examples/valid/necessity_demo.af -o workflow.py --profile real
+#
+# Without a model the report only shows what can be known statically: `finisher` cannot be skipped (nothing else
+# writes `answer`), while `drafter` and `reviewer` are testable and stay in until measured.
+
+state AnswerState {
+  input question: string
+  draft: string = ""
+  review: string = ""
+  output answer: string
+}
+
+agent drafter {
+  state.draft = llm("Answer the question in one short sentence.", state.question)
+}
+
+agent reviewer {
+  state.review = llm("Point out anything wrong or missing in this draft answer.", state.draft)
+}
+
+agent finisher {
+  state.answer = llm("Write the final answer. Use the draft and the review.", state.draft, state.review)
+}
+
+flow main {
+  start -> drafter -> reviewer -> finisher -> end
+}
+
+necessity trim_workflow {
+  case {
+    state.question = "What is the capital of France?"
+    expect state.answer contains "Paris"
+  }
+  case {
+    state.question = "What is the capital of Japan?"
+    expect state.answer contains "Tokyo"
+  }
+  case {
+    state.question = "What is the capital of Spain?"
+    expect state.answer contains "Madrid"
+  }
+}

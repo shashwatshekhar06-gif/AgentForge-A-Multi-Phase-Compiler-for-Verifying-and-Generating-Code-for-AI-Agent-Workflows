@@ -9,12 +9,15 @@ but the output of the phases that did run is still returned so the UI can show i
 import sys
 
 from . import ast_nodes as ast
+from .candidates import check_candidates, unsafe_candidates
 from .codegen import generate
 from .cost import analyze_cost
 from .diagnostics import error, has_errors
+from .evaluate import evaluate_all
 from .ir import build_ir
 from .lexer import tokenize
-from .optimize import eliminate_dead_agents, eliminate_dead_llm_calls
+from .necessity import necessity_all
+from .optimize import eliminate_dead_agents, eliminate_dead_llm_calls, prune_unneeded, select_agents
 from .parser import parse
 from .semantic import analyze
 from .verify import verify
@@ -32,7 +35,7 @@ EMPTY_DATA = {
     "semantic": {"symbols": {"state": [], "tools": [], "agents": []}},
     "ir": {"nodes": [], "edges": []},
     "verify": {"checks": []},
-    "optimize": {"removed_agents": [], "removed_stores": []},
+    "optimize": {"removed_agents": [], "removed_stores": [], "selected": [], "pruned": []},
     "cost": {"worst": {"llm": None, "tool": None}, "best": {"llm": None, "tool": None}, "agents": [],
              "unbounded_loops": [], "removed_llm_calls": 0},
     "codegen": {"code": ""},
@@ -42,10 +45,19 @@ EMPTY_DATA = {
 class CompileRun:
     """Collects each phase's output and all diagnostics for one compilation."""
 
-    def __init__(self):
+    def __init__(self, profile=None, select=True):
+        # scores measured with a real model: a list of compare reports (evaluate.py), or a dict
+        # {"compare": [...], "necessity": [...]} (necessity.py); None = use the mock / static profile
+        if isinstance(profile, dict):
+            self.profile, self.necessity_profile = profile.get("compare"), profile.get("necessity")
+        else:
+            self.profile, self.necessity_profile = profile, None
+        self.select = select     # apply what was measured: wire the best compare candidate, prune unneeded agents
         self.phases = {}
         self.diagnostics = []
         self.current = "lexer"   # the phase that is running now (for error reporting)
+        self.evaluation = []     # one report per `compare` block (see evaluate.py)
+        self.necessity = []      # one report per `necessity` block (see necessity.py)
 
     def record(self, name, data, diagnostics=()) -> bool:
         """Store one phase's result. Returns True if the pipeline may continue."""
@@ -63,6 +75,8 @@ class CompileRun:
             "ok": not has_errors(self.diagnostics),
             "phases": {name: self.phases[name] for name in PHASES},
             "diagnostics": [d.to_dict() for d in self.diagnostics],
+            "evaluation": self.evaluation,
+            "necessity": self.necessity,
         }
 
     def too_deep(self) -> dict:
@@ -75,8 +89,8 @@ class CompileRun:
         return self.result()
 
 
-def compile_source(source: str, source_name: str = "workflow.af") -> dict:
-    run = CompileRun()
+def compile_source(source: str, source_name: str = "workflow.af", profile=None, select: bool = True) -> dict:
+    run = CompileRun(profile, select)
     try:
         return compile_front_half(source, run, source_name)
     except RecursionError:
@@ -97,9 +111,9 @@ def compile_front_half(source: str, run: CompileRun, source_name: str) -> dict:
     return compile_back_half(program, run, source_name)
 
 
-def compile_program(program: ast.Program, source_name: str = "workflow.af") -> dict:
+def compile_program(program: ast.Program, source_name: str = "workflow.af", profile=None, select: bool = True) -> dict:
     """Run the pipeline from an already built AST (lets the back half be tested from AST fixtures)."""
-    run = CompileRun()
+    run = CompileRun(profile, select)
     run.phases["lexer"] = {"status": "skipped", "tokens": []}
     run.record("parser", {"ast": program.to_dict()})
     try:
@@ -120,16 +134,29 @@ def compile_back_half(program: ast.Program, run: CompileRun, source_name: str) -
     # 5. verification (the IR is recorded after it, so node colors include the results)
     run.current = "verify"
     checks, diags = verify(graph, symbols)
+    diags += check_candidates(graph, symbols)   # could each compare candidate replace the wired agent?
     mark_node_status(graph, diags)
     run.record("ir", graph.to_dict())
     if not run.record("verify", {"checks": checks}, diags):
         return run.result()
 
-    # 6. optimization: remove agents that can never run, then LLM calls whose result is never used
-    optimized, removed_agents = eliminate_dead_agents(graph)
+    # 6. optimization: wire the best candidate of each compare block, remove agents that can never run,
+    #    then LLM calls whose result is never used
+    run.evaluation = evaluate_all(symbols, graph, run.profile)
+    selected = []
+    optimized = graph
+    if run.select:
+        optimized, selected = select_agents(graph, run.evaluation, unsafe_candidates(graph, symbols))
+    pruned = []
+    run.necessity = necessity_all(symbols, optimized, run.necessity_profile)   # which agents can be skipped?
+    if run.select:
+        optimized, pruned = prune_unneeded(optimized, symbols, run.necessity)
+    optimized, removed_agents = eliminate_dead_agents(optimized)
+    removed_agents = [a for a in removed_agents if a not in symbols.candidate_names()]   # candidates wait on purpose
     optimized, removed_stores, diags = eliminate_dead_llm_calls(optimized, symbols)
     run.record("optimize", {"removed_agents": removed_agents,
-                            "removed_stores": [r.to_dict() for r in removed_stores]}, diags)
+                            "removed_stores": [r.to_dict() for r in removed_stores],
+                            "selected": selected, "pruned": pruned}, diags)
 
     # 7. static cost analysis (worst / best case number of LLM and tool calls per run)
     report, cost_diags = analyze_cost(optimized, removed_stores)

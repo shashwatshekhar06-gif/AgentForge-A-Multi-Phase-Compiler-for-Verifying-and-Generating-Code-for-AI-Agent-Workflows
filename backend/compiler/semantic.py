@@ -49,12 +49,30 @@ class AgentInfo:
 
 
 @dataclass
+class CompareInfo:
+    name: str
+    decl: ast.CompareDecl
+    candidates: list = field(default_factory=list)   # candidate agent names that exist, in source order
+
+
+@dataclass
+class NecessityInfo:
+    name: str
+    decl: ast.NecessityDecl
+
+
+@dataclass
 class SymbolTable:
     fields: dict = field(default_factory=dict)   # name -> FieldInfo
     tools: dict = field(default_factory=dict)    # name -> ToolInfo
     agents: dict = field(default_factory=dict)   # name -> AgentInfo
     flow: Optional[ast.FlowDecl] = None
     one_of_sets: dict = field(default_factory=dict)   # field -> allowed values (from llm one_of)
+    compares: dict = field(default_factory=dict)      # name -> CompareInfo (agents competing for the same job)
+    necessities: dict = field(default_factory=dict)   # name -> NecessityInfo (which agents can the workflow do without?)
+
+    def candidate_names(self) -> set:
+        return {c for info in self.compares.values() for c in info.candidates}
 
     def to_dict(self) -> dict:
         return {
@@ -63,6 +81,11 @@ class SymbolTable:
                        "return_type": t.return_type, "tags": sorted(t.tags)} for t in self.tools.values()],
             "agents": [{"name": a.name, "reads": a.reads, "writes": a.writes, "must_writes": a.must_writes}
                        for a in self.agents.values()],
+            "compares": [{"name": c.name, "candidates": c.candidates, "cases": len(c.decl.cases),
+                          "end_to_end": c.decl.end_to_end,
+                          "ensure": ast.expr_to_source(c.decl.ensure) if c.decl.ensure is not None else None}
+                         for c in self.compares.values()],
+            "necessities": [{"name": n.name, "cases": len(n.decl.cases)} for n in self.necessities.values()],
         }
 
 
@@ -106,6 +129,10 @@ class Analyzer:
         self.collect_one_of_sets()
         if self.symbols.flow:
             self.check_flow(self.symbols.flow)
+        for info in self.symbols.compares.values():
+            self.check_compare(info)
+        for info in self.symbols.necessities.values():
+            self.check_necessity(info)
         return self.symbols, self.diagnostics
 
     # ---------- pass 1: symbol tables ----------
@@ -128,6 +155,18 @@ class Analyzer:
                     self.err("AF-E205", f"duplicate agent '{decl.name}'", decl)
                 else:
                     self.symbols.agents[decl.name] = AgentInfo(decl.name, decl)
+            elif isinstance(decl, ast.CompareDecl):
+                self.check_not_reserved("compare", decl)
+                if decl.name in self.symbols.compares:
+                    self.err("AF-E205", f"duplicate compare '{decl.name}'", decl)
+                else:
+                    self.symbols.compares[decl.name] = CompareInfo(decl.name, decl)
+            elif isinstance(decl, ast.NecessityDecl):
+                self.check_not_reserved("necessity", decl)
+                if self.symbols.necessities:
+                    self.err("AF-E218", f"only one necessity block is allowed ('{decl.name}' is a second one)", decl)
+                else:
+                    self.symbols.necessities[decl.name] = NecessityInfo(decl.name, decl)
             elif isinstance(decl, ast.FlowDecl):
                 if self.symbols.flow:
                     self.err("AF-E205", f"duplicate flow declaration '{decl.name}' (only one is allowed)", decl)
@@ -324,7 +363,105 @@ class Analyzer:
             visit(agent.decl.body)
         self.symbols.one_of_sets = {k: v for k, v in sets.items() if k not in disqualified}
 
-    # ---------- pass 3: flow ----------
+    # ---------- pass 3: compare blocks ----------
+
+    def check_compare(self, info: CompareInfo):
+        """A compare block names agents that do the same job and test cases that judge their output.
+        Here we check the block itself; whether a winner could be swapped into the flow is checked in
+        candidates.py, once the graph exists."""
+        decl = info.decl
+        seen = set()
+        for ref in decl.candidates:
+            if ref.name not in self.symbols.agents:
+                self.err("AF-E204", f"unknown agent '{ref.name}' in compare '{decl.name}'", ref)
+            elif ref.name in seen:
+                self.err("AF-E214", f"agent '{ref.name}' is listed twice in compare '{decl.name}'", ref)
+            else:
+                seen.add(ref.name)
+                info.candidates.append(ref.name)
+        if len(decl.candidates) < 2:
+            self.err("AF-E214", f"compare '{decl.name}' needs at least two candidates to choose between", decl)
+        if not decl.cases:
+            self.err("AF-E214", f"compare '{decl.name}' has no test case; without one nothing can be scored", decl)
+        if decl.ensure is not None:
+            if self.contains_call(decl.ensure):
+                self.err("AF-E211", "'ensure' may only read state (no tool or llm calls)", decl.ensure)
+            else:
+                self.check_condition(decl.ensure)
+        for case in decl.cases:
+            self.check_case(info, case)
+
+    def check_case(self, info: CompareInfo, case: ast.CompareCase):
+        for stmt in case.inputs:
+            field_info = self.lookup_field(stmt.target)
+            if field_info is None:
+                continue
+            self.check_case_value(field_info, stmt.value, stmt)
+        if len(case.expects) != 1:
+            self.err("AF-E214", f"a case needs exactly one 'expect' line, found {len(case.expects)}", case)
+        for exp in case.expects:
+            field_info = self.lookup_field(exp.target)
+            if field_info is None:
+                continue
+            if exp.op == "contains" and field_info.type != "string":
+                self.err("AF-E203", f"'contains' needs a string field, but state.{field_info.name} is "
+                                    f"{field_info.type}", exp)
+            elif exp.value.value_type != field_info.type:
+                self.err("AF-E203", f"state.{field_info.name} is {field_info.type}, but the expected value "
+                                    f"{ast.expr_to_source(exp.value)} is {exp.value.value_type}", exp.value)
+            # judged alone, a candidate must write the field itself; judged end to end, a later agent may write it
+            for name in ([] if info.decl.end_to_end else info.candidates):
+                if field_info.name not in self.symbols.agents[name].writes:
+                    self.err("AF-E215", f"agent '{name}' never writes state.{field_info.name}, so it cannot be "
+                                        f"scored on this case", exp)
+        mocked = set()
+        for mock in case.mocks:
+            if mock.agent not in info.candidates:
+                self.err("AF-E214", f"'{mock.agent}' is not a candidate of compare '{info.name}'", mock)
+            elif mock.agent in mocked:
+                self.err("AF-E214", f"agent '{mock.agent}' has two mock answers in the same case", mock)
+            mocked.add(mock.agent)
+
+    def check_necessity(self, info: NecessityInfo):
+        """A necessity block is only test cases: the workflow runs end to end on each, with and without each agent."""
+        decl = info.decl
+        if not decl.cases:
+            self.err("AF-E214", f"necessity '{decl.name}' has no test case; without one nothing can be measured", decl)
+        for case in decl.cases:
+            for stmt in case.inputs:
+                field_info = self.lookup_field(stmt.target)
+                if field_info is not None:
+                    self.check_case_value(field_info, stmt.value, stmt)
+            if len(case.expects) != 1:
+                self.err("AF-E214", f"a case needs exactly one 'expect' line, found {len(case.expects)}", case)
+            for exp in case.expects:
+                field_info = self.lookup_field(exp.target)
+                if field_info is None:
+                    continue
+                if exp.op == "contains" and field_info.type != "string":
+                    self.err("AF-E203", f"'contains' needs a string field, but state.{field_info.name} is "
+                                        f"{field_info.type}", exp)
+                elif exp.value.value_type != field_info.type:
+                    self.err("AF-E203", f"state.{field_info.name} is {field_info.type}, but the expected value "
+                                        f"{ast.expr_to_source(exp.value)} is {exp.value.value_type}", exp.value)
+            for mock in case.mocks:
+                self.err("AF-E214", "a necessity block runs the real workflow, so scripted 'mock' answers are not used", mock)
+
+    def check_case_value(self, field_info: FieldInfo, value, stmt):
+        """The starting value a case gives a field must have the field's type."""
+        if isinstance(value, list):
+            if not field_info.type.startswith("list["):
+                self.err("AF-E203", f"state.{field_info.name} is {field_info.type}, but a list was given", stmt)
+                return
+            for item in value:
+                if item.value_type != field_info.type[5:-1]:
+                    self.err("AF-E203", f"list item {ast.expr_to_source(item)} is {item.value_type}, "
+                                        f"expected {field_info.type[5:-1]}", item)
+        elif value.value_type != field_info.type:
+            self.err("AF-E203", f"state.{field_info.name} is {field_info.type}, but {ast.expr_to_source(value)} "
+                                f"is {value.value_type}", value)
+
+    # ---------- pass 4: flow ----------
 
     def check_flow(self, flow: ast.FlowDecl):
         self.reported_unknown = set()   # report each unknown agent name only once

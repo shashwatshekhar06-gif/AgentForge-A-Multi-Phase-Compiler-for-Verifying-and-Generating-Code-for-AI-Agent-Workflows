@@ -36,7 +36,7 @@ def test_generated_file_structure():
     assert "def llm(prompt, *context, one_of=None):" in code
     assert "graph.add_conditional_edges(" in code
     assert "app = graph.compile()" in code
-    assert "REAL MODEL CALL GOES HERE" in code
+    assert "def real_llm(prompt, context, one_of):" in code
 
 
 def test_compiler_does_not_import_langgraph():

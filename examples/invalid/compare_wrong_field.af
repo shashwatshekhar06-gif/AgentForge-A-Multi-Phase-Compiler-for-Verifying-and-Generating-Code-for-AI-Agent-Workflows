@@ -1,0 +1,29 @@
+# expect: AF-E215
+# The test case judges state.answer, but responder_b writes state.summary instead,
+# so its output can never be scored. Fix: make both candidates write the same field.
+
+state S {
+  input question: string
+  output answer: string
+  summary: string
+}
+
+agent responder_a {
+  state.answer = llm("Answer briefly", state.question)
+}
+
+agent responder_b {
+  state.summary = llm("Answer briefly", state.question)
+}
+
+flow main {
+  start -> responder_a -> end
+}
+
+compare best_responder {
+  candidates responder_a, responder_b
+  case {
+    state.question = "Capital of France?"
+    expect state.answer contains "Paris"
+  }
+}

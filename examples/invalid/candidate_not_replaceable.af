@@ -1,0 +1,33 @@
+# expect: AF-E216
+# responder_b scores better in the test, but it reads state.notes and nothing writes that field
+# on the way to it. If the winner were swapped into the flow, the run would crash after paid
+# LLM calls. The compiler re-checks the workflow with each candidate in place and refuses.
+# Fix: give `notes` a default value, or write it in an earlier agent.
+
+state S {
+  input question: string
+  notes: string
+  output answer: string
+}
+
+agent responder_a {
+  state.answer = llm("Answer briefly", state.question)
+}
+
+agent responder_b {
+  state.answer = llm("Answer using the notes", state.question, state.notes)
+}
+
+flow main {
+  start -> responder_a -> end
+}
+
+compare best_responder {
+  candidates responder_a, responder_b
+  case {
+    state.question = "Capital of France?"
+    expect state.answer contains "Paris"
+    mock responder_a "Lyon."
+    mock responder_b "Paris."
+  }
+}

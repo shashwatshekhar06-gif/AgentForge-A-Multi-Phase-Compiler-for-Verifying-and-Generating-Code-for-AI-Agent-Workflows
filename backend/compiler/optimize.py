@@ -1,5 +1,10 @@
 """Graph optimizations.
 
+0. Agent selection (profile-guided): when a `compare` block lists several agents for the same job, the one
+   that passed the most test cases is wired into the generated code (select_agents below).
+   Agent pruning (profile-guided): when a `necessity` block's test cases show the workflow is just as good without
+   an agent, that agent is removed from the generated code (prune_unneeded below).
+
 1. Dead agent elimination
    An agent that cannot be reached from `start` can never run, so generating code for it is
    wasted. This is the graph version of dead code elimination in ordinary compilers.
@@ -26,8 +31,71 @@ from dataclasses import dataclass, replace
 from . import ast_nodes as ast
 from .diagnostics import warning
 from .ir import IRGraph, calls_in_expr
+from .candidates import swap_candidate
+from .necessity import bypass_agent, problems
 from .semantic import SymbolTable, state_refs
 from .verify import reachable_from
+
+
+# ---------- 0. agent selection (profile-guided) ----------
+
+def select_agents(graph: IRGraph, reports: list, unsafe: set):
+    """Put the best candidate of every `compare` block into the graph, in place of the agent that was wired.
+
+    This is profile-guided optimization for AI workflows: the test cases of the compare block are the profile
+    (see evaluate.py), "passes the most cases" is the measurement, and the generated code uses the winner.
+    Rules that keep it safe:
+      - only blocks with exactly one wired candidate (otherwise it is unclear which one to replace),
+      - a tie changes nothing (the agent already in the flow stays),
+      - a winner whose swap would add a verification problem (AF-W310) is never applied.
+    The reports are updated: `applied` names the winner that was put in, `blocked` says why it was not.
+    Returns (graph, selections).
+    """
+    selections = []
+    for report in reports:
+        wired = report["wired"]
+        best = report["best"]
+        if len(wired) != 1 or best == wired[0]:
+            continue
+        if (report["name"], best) in unsafe:
+            report["blocked"] = (f"'{best}' scored higher, but putting it in the flow would add a verification "
+                                 f"warning (AF-W310), so '{wired[0]}' stays")
+            continue
+        graph = swap_candidate(graph, wired[0], best)
+        report["applied"] = best
+        scores = {s["agent"]: f"{s['passed']}/{s['total']}" for s in report["scores"]}
+        selections.append({"compare": report["name"], "replaced": wired[0], "with": best,
+                           "scores": scores, "profile": report["mode"]})
+    return graph, selections
+
+
+def prune_unneeded(graph: IRGraph, symbols: SymbolTable, reports: list):
+    """Remove the agents a measured `necessity` report found unnecessary: skipping them did not make the final
+    output worse on the test cases. Each removal is verified again, and one that would add a verification
+    problem is refused. Only MEASURED reports prune anything (a static report has no scores).
+    Returns (graph, pruned) and records `applied` / `blocked` in the reports."""
+    pruned = []
+    for report in reports:
+        if report["mode"] != "measured":
+            continue
+        known = problems(graph, symbols)
+        for name in report["removable"]:
+            if name not in graph.nodes:
+                continue
+            trial = bypass_agent(graph, name)
+            added = problems(trial, symbols) - known
+            if added:
+                report["blocked"].append(f"'{name}' was not needed, but removing it would add a verification problem "
+                                         f"({sorted(added)[0][1]}), so it stays")
+                continue
+            graph = trial
+            row = next(r for r in report["agents"] if r["agent"] == name)
+            row["removed"] = True
+            report["applied"].append(name)
+            pruned.append({"necessity": report["name"], "agent": name, "llm_calls_saved": row["llm_calls"],
+                           "score_with": report["baseline"], "score_without": row["score_without"],
+                           "total": report["total"]})
+    return graph, pruned
 
 
 # ---------- 1. dead agents ----------
@@ -118,6 +186,9 @@ def liveness(graph: IRGraph, symbols: SymbolTable):
             for e in graph.out_edges(node_id):
                 if e.condition is not None:
                     out |= reads_of(e.condition)   # routing reads these after the agent runs
+            for info in symbols.compares.values():
+                if info.decl.ensure is not None and node_id in info.candidates:
+                    out |= reads_of(info.decl.ensure)   # the run-time check reads these right after the agent
             new_in = outputs if node.kind == "end" else live_before(node.body, out)
             if out != live_out[node_id] or new_in != live_in[node_id]:
                 live_out[node_id], live_in[node_id] = out, set(new_in)

@@ -2,7 +2,7 @@
 
 How the compiler was tested, what testing found, and how to reproduce every result.
 
-**Summary:** 210 automated tests, all passing in about 40 seconds. Edge case testing, fuzzing and differential testing found **8 real bugs**, all fixed. After the fixes, more than 4,000 random and corrupted programs never made the compiler crash, and the verifier agreed exactly with an independent brute force checker on 480 random workflows.
+**Summary:** 342 automated tests, all passing in about 40 seconds. Edge case testing, fuzzing and differential testing found **8 real bugs**, all fixed. After the fixes, more than 4,000 random and corrupted programs never made the compiler crash, and the verifier agreed exactly with an independent brute force checker on 480 random workflows.
 
 Environment: Python 3.12.6, LangGraph 1.2.16, Windows 11.
 
@@ -27,13 +27,18 @@ All random tests use fixed seeds, so every run produces exactly the same program
 | `test_semantic.py` | 17 | every semantic error code, read/write/must-write inference; also runs from a hand written AST fixture |
 | `test_verify.py` | 13 | each verification pass on its own: reachability, SCC cycles, dataflow fixpoint, witness paths, else edges |
 | `test_codegen.py` | 7 | generated file structure, loop counters, dead agent removal, runs the generated workflows |
-| `test_examples.py` | 19 | every valid example compiles and passes `py_compile`; every invalid example gives exactly its expected codes |
+| `test_examples.py` | 26 | every valid example compiles and passes `py_compile`; every invalid example gives exactly its expected codes |
 | `test_api.py` | 3 | the `/api/compile` and `/api/examples` endpoints match the contract |
 | `test_edge_cases.py` | 75 | edge cases in every phase, including 8 tests that run unusual generated programs under LangGraph |
 | `test_fuzz.py` | 19 | mutation fuzzing, random garbage input, differential testing of the verifier |
 | `test_cost.py` | 24 | dead LLM call elimination (liveness: loops, branches, edge conditions, chains, side effects) and static cost analysis (loops, branches, short circuits, unbounded loops), with differential testing against brute-force path enumeration |
 | `test_taint.py` | 14 | prompt-injection taint analysis: sources, propagation through llm and agents, sanitizers, clean overwrites, branches, loops, bool decisions |
-| **Total** | **210** | |
+| `test_compare.py` | 65 | the `compare` feature: syntax, semantic errors, the swap check (AF-E216, AF-W310, AF-W311), scoring and ties, the optimizer selecting the winner (and refusing an unsafe one), measured profiles replayed into the compiler, the `--profile real` command line with a faked model run, the generated evaluator run for real and checked against the compiler's own evaluation, the real-model switch against fake HTTP responses (OpenAI and Anthropic), the API field |
+| `test_envfile.py` | 8 | reading API keys from a `.env` file (compiler and generated files): parsing, real environment wins, names but never values are printed, switched off in tests, `.env` is git-ignored |
+| `test_end_to_end.py` | 18 | `end_to_end` scoring (the mock interpreter and the generated file agree), loops and a stopped workflow, `ensure` (checks, fallback to the next candidate, error when none passes, ignored for mock answers) and that the optimizer keeps what `ensure` reads |
+| `test_api_real.py` | 10 | `/api/compile-real`: needs a key, never returns it, call limit, one run at a time, errors, the call estimate; the measurement itself is faked |
+| `test_necessity.py` | 24 | the `necessity` block: syntax and checks, which agents are testable (tool, branching, candidate, structural), bypassing an agent, measured pruning (and refusing a removal that breaks verification), the generated harness against a faked model (the greedy order, the number of calls, no extra calls when nothing passes), the CLI and the API |
+| **Total** | **342** | |
 
 ## 3. Testing methods
 
